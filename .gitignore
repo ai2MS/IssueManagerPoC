@@ -1,0 +1,5 @@
+/.env
+/.venv
+/bootstrap.log
+/default_project.log
+/test.deleteme
