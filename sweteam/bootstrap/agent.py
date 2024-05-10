@@ -279,7 +279,8 @@ class OpenAI_Agent:
         logger.debug(f"chat_with_other_agent {agent_name} {message}")
         the_other_agent = [a for a in agents if a.name==agent_name][0]
         if the_other_agent:
-            return the_other_agent.perform_task(message)
+            chat_result = the_other_agent.perform_task(message)
+            return chat_result['Assistant']
         else:
             raise Exception(f"Agent {agent_name} not found")
 
