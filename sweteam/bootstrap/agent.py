@@ -150,6 +150,9 @@ class OpenAI_Agent:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logger.debug(f"Exiting agent {self.name}")
+        self.llm_client.beta.threads.delete(thread_id=self.thread.id)
+        self.llm_client.beta.assistants.delete(assistant_id=self.assistant.id)
+
 
 
     def __str__(self):
