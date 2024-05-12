@@ -67,24 +67,17 @@ class OpenAI_Agent:
             None
 
         """
-        useAzureOpenAI = os.environ.get("USE_AZURE") == "True"
         logger.info(f"Initializing agent {agent_name}")
         self.file_name = __file__
         self.name = agent_name
         if agent_dir is None:
-            agent_dir = os.path.join(current_directory(), "agents")
+            agent_dir = current_directory()
         try:
             config_json = os.path.join(agent_dir, f"{agent_name}.json")
             agent_config = json.load(open(config_json))
             self.instruction = agent_config['instruction']
             self.tools = standard_tools
             self.tools.extend(agent_config['tools'])
-            if (useAzureOpenAI):
-                self.model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME",None)
-                self.tools.append({"type":"retrieve"})
-            else:
-                self.model = os.environ.get("OPENAI_MODEL",None)
-                self.toosl.append({"type":"file_search"})
         except json.decoder.JSONDecodeError:
             logger.fatal(f"{agent_name}m.json file is not valid JSON. Please fix the pm.json file.")
             exit()
@@ -97,7 +90,7 @@ class OpenAI_Agent:
 
 
         try:
-            if (useAzureOpenAI):
+            if (os.environ.get("USE_AZURE") == "True"):
                 azure_openai_api_key=os.environ.get("AZURE_OPENAI_API_KEY", None)
                 if azure_openai_api_key is None:
                     logger.fatal(f"Please provide AZURE_OPENAI_API_KEY as environment variable.  Cannot continue without AZURE_OPENAI_API_KEY.")
