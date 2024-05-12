@@ -12,7 +12,7 @@ standard_tools = [
             "parameters": {
               "type": "object",
               "properties": {
-                "file_name": {
+                "filename": {
                   "type": "string",
                   "description": "The name of the file to be written."
                 },
@@ -50,10 +50,6 @@ standard_tools = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_name": {
-                            "type": "string",
-                            "description": "The name of the source code file to read."
-                        }
                     },
                     "required": []
                 }

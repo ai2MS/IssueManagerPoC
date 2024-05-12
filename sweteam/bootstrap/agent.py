@@ -81,10 +81,10 @@ class OpenAI_Agent:
             self.tools.extend(agent_config['tools'])
             if (useAzureOpenAI):
                 self.model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME",None)
-                self.tools.append({"type":"retrieve"})
+                #Azure does not support #self.tools.append({"type":"retrieval"})
             else:
                 self.model = os.environ.get("OPENAI_MODEL",None)
-                self.toosl.append({"type":"file_search"})
+                self.tools.append({"type":"file_search"})
         except json.decoder.JSONDecodeError:
             logger.fatal(f"{agent_name}m.json file is not valid JSON. Please fix the pm.json file.")
             exit()
@@ -95,7 +95,14 @@ class OpenAI_Agent:
             logger.fatal(f"{agent_name}.json file does not contain an 'instruction' key. Please add an 'instruction' key to the pm.json file.")
             exit()
 
+    def __enter__(self):
+        """
+        Enter the context manager.
 
+        Returns:
+            None
+        """
+        useAzureOpenAI = os.environ.get("USE_AZURE") == "True"
         try:
             if (useAzureOpenAI):
                 azure_openai_api_key=os.environ.get("AZURE_OPENAI_API_KEY", None)
@@ -118,26 +125,49 @@ class OpenAI_Agent:
             # Try find assistant with this name (latest first)
             assistants = self.llm_client.beta.assistants.list(order="desc")
             for assistant in assistants:
-                if (assistant.name == agent_name
+                if (assistant.name == self.name
                         and assistant.model == self.model 
                         and assistant.instructions == self.instruction):
                     self.assistant = self.llm_client.beta.assistants.retrieve(assistant_id=assistant.id)
-                    logger.debug(f"Found existing assistant {agent_name}")
+                    logger.debug(f"Found existing assistant {self.name}")
                     break
             else:
                 self.assistant = self.llm_client.beta.assistants.create(
-                    name=agent_name,
+                    name=self.name,
                     instructions=self.instruction,
                     model=self.model, 
                     tools=self.tools,
                 )
-                logger.debug(f"Created new assistant {agent_name}")
+                logger.debug(f"Created new assistant {self.name}")
 
             self.thread = self.llm_client.beta.threads.create()
         except Exception as e:
             logger.fatal(f"Failed to create OPENAI Assistant, received Error {e}.")
             exit()
+            
+        return self
 
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        logger.debug(f"Exiting agent {self.name}")
+
+
+    def __str__(self):
+        """Allow printing of myself (source code)"""
+        return f"<Agent: {self.name}>"
+    def __repr__(self):
+        """Allow printing of myself (source code)"""
+        return f"<Agent: {self.name}>" #json.dumps(self.my_own_code())
+
+    def my_own_code(self):
+        """Return my own source code.
+        This will allow the AI to request my own source code for analyzing and self update.
+        """
+        logger.debug("my_own_code")
+        with open(self.file_name, "r") as f:
+            code = f.read()
+        return code
+    
 
     def perform_task(self, task: str = None) -> dict:
         """
@@ -169,10 +199,10 @@ class OpenAI_Agent:
         )
         result = {}
         while self.run.status in ["queued", "in_progress", "requires_action"]:
-            logger.debug(f"{self.run.status=}")
+            logger.debug(f"<{self.name}>-{self.run.status=}")
             if self.run.status == "requires_action":
                 required_actions = self.run.required_action.submit_tool_outputs.model_dump()
-                logger.info(f"TASK:STEP <{self.name}>-tool_calls: {required_actions}")
+                logger.info(f"<{self.name}> TASK:STEP -tool_calls: {required_actions}")
                 tools_output = []
                 for action in required_actions["tool_calls"]:
                     func_name = action["function"]["name"]
@@ -180,21 +210,21 @@ class OpenAI_Agent:
                     func_names = [item['function']['name'] for item in self.tools if item['type'] == 'function']
                     if func_name in func_names:
                         func = getattr(self, func_name, None)
-                        logger.debug(f"will call tool {func_name} with arguments {arguments}")
+                        logger.debug(f"<{self.name}> -will call tool {func_name} with arguments {arguments}")
                         output = func(**arguments)
-                        logger.debug(f"tool {func_name} returned {output}")
+                        logger.debug(f"<{self.name}> -tool {func_name} returned {output}")
                         if output is not None:  # Check if output is not None
                             tools_output.append({
                                 "tool_call_id": action["id"],
                                 "output": output
                             })
                         else:
-                            logger.warn(f"Function {func_name} returned None")
+                            logger.warn(f"<{self.name}> TASK:STEP -Function {func_name} returned None")
                     else:
-                        logger.warn("Function not found")
+                        logger.warn(f"<{self.name}> TASK:STEP -Function not found")
                     
                 if tools_output:
-                    logger.info(f"TASK:STEP <{self.name}>-tool_outputs: {tools_output}")
+                    logger.info(f"<{self.name}> TASK:STEP <{self.name}>-tool_outputs: {tools_output}")
                     try:
                         self.run = self.llm_client.beta.threads.runs.submit_tool_outputs_and_poll(
                         thread_id=self.thread.id,
@@ -202,48 +232,33 @@ class OpenAI_Agent:
                         tool_outputs=tools_output
                         )
                     except Exception as e:
-                        logger.error("Failed to submit tool outputs:", e)
+                        logger.error(f"<{self.name}> TASK:STEP -Failed to submit tool outputs:", e)
                     else:
-                        logger.info("Tool outputs submitted successfully.")
-     
+                        logger.info(f"<{self.name}> TASK:STEP -Tool outputs submitted successfully.")
+
             time.sleep(0.5)
             self.run = self.llm_client.beta.threads.runs.retrieve(
                 thread_id=self.run.thread_id,
                 run_id=self.run.id,
             )
-        logger.debug(f"after while wait ... {self.run.status=}")
+        logger.debug(f"<{self.name}> : -after while wait ... {self.run.status=}")
         if self.run.status == 'completed':
             messages = self.llm_client.beta.threads.messages.list(
                 thread_id=self.run.thread_id
             )
-            for msg in messages.data:
+            for msg in sorted(messages.data, key=lambda x: x.role, reverse=True):
                 role = msg.role
                 content = msg.content[0].text.value
-                logger.debug(f"run.status is completed - msg is -{role.capitalize()}: {content}")
+                logger.debug(f"<{self.name}> : -run.status is completed - msg is -{role.capitalize()}: {content}")
                 result[role.capitalize()]=content
         else: 
             logger.warn(f"OpenAI run returned status {self.run.status} which is unexpected at this stage.")
 
-        logger.info(f"TASK:END <{self.name}>-result:{result}")
-        return result
+        logger.info(f"<{self.name}> TASK:END -result:{result}")
 
-    def __str__(self):
-        """Allow printing of myself (source code)"""
-        return json.dumps(self.my_own_code())
-    def __repr__(self):
-        """Allow printing of myself (source code)"""
-        return json.dumps(self.my_own_code())
-
-    def my_own_code(self):
-        """Return my own source code.
-        This will allow the AI to request my own source code for analyzing and self update.
-        """
-        logger.debug("my_own_code")
-        with open(self.file_name, "r") as f:
-            code = f.read()
-        return code
+        return result and result.get("Assistant")
     
-    def write_to_file(self, filename: str, text: str) -> str:
+    def write_to_file(self, filename: str, content: str) -> str:
         """Write text to a file
 
         Args:
@@ -253,15 +268,15 @@ class OpenAI_Agent:
         Returns:
             str: A message indicating success or failure
         """
-        logger.debug(f"write_to_file {filename} {text}")
+        logger.debug(f"write_to_file {filename} {content}")
         try:
             directory = os.path.dirname(filename)
             if directory:
                 os.makedirs(directory, exist_ok=True)
             with open(filename, "w", encoding="utf-8") as f:
-                f.write(text)
-            logger.info("write"+filename)
-            return "File written to successfully."
+                f.write(content)
+            logger.info(f"{self.name} -write {filename}")
+            return f"File {filename} has been written successfully."
         except Exception as e:
             return f"Error: {str(e)} ____ {e}"
 
@@ -276,7 +291,7 @@ class OpenAI_Agent:
         """
         logger.debug(f"get_human_input {prompt}")
         if prompt:
-            result = input(prompt+":")
+            result = input(f"\n***************User Input Needed***************\n{prompt}:")
         else:
             result = input("The AI needs some input from you:")
         return result
@@ -295,7 +310,7 @@ class OpenAI_Agent:
         the_other_agent = [a for a in agents if a.name==agent_name][0]
         if the_other_agent:
             chat_result = the_other_agent.perform_task(message)
-            return chat_result['Assistant']
+            return chat_result or chat_result['Assistant']
         else:
             raise Exception(f"Agent {agent_name} not found")
 

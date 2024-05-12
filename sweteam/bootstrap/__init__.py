@@ -8,10 +8,17 @@ some other agents human or AI developers.
 This in turn means this piece of software will evolve the software development 
 capabilities that only needed by this project, instead of having to acquire full
 software development capability. 
+
+Usage:
+    python -m sweteam.bootstrap [-p project_name] [-n]
+    project_name is what the actual project should be called, if not provided, its "default", you can also set PROJECT_NAME environment variable for this
+    -n will remove old project dir and start a new one with that name, so be careful using this option.
+
 """
 
 import logging
 import os
+import contextlib
 
 logger = logging.getLogger(__name__)
 match os.environ.get("LOG_LEVEL"):
@@ -38,19 +45,25 @@ file_handler.setFormatter(f_format)
 logger.addHandler(file_handler)
 
 agents = []
+
 # load agents
 def load_agents():
+    global agents
     from . import agent
     agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
     logger.debug(f"package name: {__package__}")
     if (my_name != 'bootstrap'):
-        agents_list = [entry for entry in os.listdir(agents_dir) if entry.endswith(".json")]
-        for agt in agents_list:
-            agents.append(agent.OpenAI_Agent(agt.removesuffix(".json"), agents_dir))
+        agents_list = [entry.removesuffix(".json") for entry in os.listdir(agents_dir) if entry.endswith(".json")]
+        with contextlib.ExitStack() as stack:
+            # for agt in agents_list:
+            #     agents.append(agent.OpenAI_Agent(agt.removesuffix(".json"), agents_dir))
+            agents.extend([stack.enter_context(agent.OpenAI_Agent(agt, agents_dir)) for agt in agents_list])
 
-        pm = [a for a in agents if a.name=="pm"][0]
-        if not pm:
-            pm = agents[0]
-        
-        if pm:
-            pm.perform_task("Start a new software project by asking the user to provide new requirements.")
+            pm = [a for a in agents if a.name=="pm"][0]
+            if not pm:
+                pm = agents[0]
+            
+            prompt = "Start a new software project by asking the user to provide new requirements."
+            while pm and prompt:
+                pm.perform_task(prompt)
+                prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
