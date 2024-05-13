@@ -1,7 +1,8 @@
 /.env
 /.venv
 /bootstrap.log
-/sweteam/default_project/
-/default_project.log
+default_project/
+/*.log
 /test.deleteme
 **/__pycache__
+.pytest_cache
