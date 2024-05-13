@@ -31,13 +31,15 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
         FileExistsError: If the project directory already exists.
         Exception: If there is an error creating the project directory.
     """
+    EMBEDDED_DEV_TEAM_NAME = "embedded_dev_team"
     if __package__ and __package__.endswith("bootstrap"):
         try:
             current_file = os.path.realpath(__file__)
             current_dir = os.path.dirname(current_file)
-            parent_dir = os.path.dirname(current_dir)
+            current_parent_dir = os.path.dirname(current_dir)
             project_dir = os.path.join(current_directory(), project_name)
-            project_team_dir = os.path.join(project_dir, "team")
+            parent_dir = os.path.dirname(project_dir)
+            project_team_dir = os.path.join(project_dir, EMBEDDED_DEV_TEAM_NAME)
             try:
                 current_git_branch = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True, check=True).stdout.strip()
                 logger.debug(f"Currently on branch {current_git_branch}")
@@ -46,7 +48,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
                     logger.warn(f"??Currently on branch <{current_git_branch}>, we shall never change it without a PR. creating new branch...")
                     all_branches = subprocess.run(['git', 'branch', '--list'], capture_output=True, text=True).stdout
                     new_branch_name = f"{project_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    if new_branch_name in [branch_name.strip() for branch_name in all_branches]:
+                    if new_branch_name in [branch_name.strip() for branch_name in all_branches.split()]:
                         new_branch_name = f"{project_name}-{datetime.now().strftime('%Y%m%d%H%M%S.%f')}"
                     return_text = subprocess.run(['git', 'checkout', '-b', new_branch_name], capture_output=True, text=True).stdout.strip()
                     logger.debug(f"creating new branch {new_branch_name} returned {return_text}")
@@ -60,6 +62,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             os.makedirs(project_team_dir, exist_ok=False)
             logger.info(f"New project <{project_name} is created.>")
             copy_directory(current_dir, project_team_dir)
+            copy_directory(os.path.join(current_parent_dir,"issue_board"), os.path.join(project_dir, "issue_board"))
             logger.info(f"and project <{project_name} is initialized with bootstrap code.>")
         except FileExistsError:
             logger.warn(f"Dir <{project_dir}> already exist. Continue project <{project_name}>")
@@ -68,11 +71,12 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             exit(101)
         
         try:
-            os.chdir(project_dir)
+            os.chdir(parent_dir)
             import importlib
             sys.path.insert(0, project_dir)
-            actual_project = importlib.import_module(project_name)
-            actual_project.team.load_agents()
+            actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
+            os.chdir(project_dir)
+            actual_project_team.load_agents()
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:
             logger.error(f"{project_name} agents run into errors {e}.")
@@ -83,13 +87,13 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
                 subprocess.run(['git', 'branch', '-D', new_branch_name], capture_output=True, text=True)
 
     else:
-        # if ppl invoke the project-team instead of the boot strap
+        # if invoke the project.team instead of the bootstrap
         try:
-            current_git_branch = subprocess.run('git branch --show_current', capture_output=True, text=True)
+            current_git_branch = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True)
             logger.debug(f"Currently on branch {current_git_branch}")
             if (current_git_branch in ["main", "master"]):
                 logger.fatal(f"??Currently on branch <{current_git_branch}>, we shall never change it without a PR. \nPlease create a new branch or switch to one of the following branches...")
-                all_branches = subprocess.run('git branch --list', capture_output=True, text=True)
+                all_branches = subprocess.run(['git', 'branch', '--list'], capture_output=True, text=True)
                 for branch in sorted(all_branches, reverse=True):
                     print(f"- {branch}")
                     exit(1)
@@ -130,12 +134,16 @@ def copy_directory(src_dir, dst_dir):
 
 
 if __name__ == "__main__":
-    incoming_project_name = os.environ.get("PROJECT_NAME", "default_project")
-    incomeing_start_over = False
-    for arg in sys.argv:
-        if arg == "-p":
-            incoming_project_name = sys.argv[sys.argv.index(arg) + 1]
-        elif arg == "-n":
-            incomeing_start_over = True
+    if __package__ and __package__.endswith(".bootstrap"):        
+        incoming_project_name = os.environ.get("PROJECT_NAME", "default_project")
+        incoming_start_over = False
+        for arg in sys.argv:
+            if arg == "-p":
+                incoming_project_name = sys.argv[sys.argv.index(arg) + 1]
+            elif arg == "-n":
+                incomeing_start_over = True
+    else:
+        incoming_project_name = __package__.split(".")[-1]
+        incoming_start_over = False
 
-    main(incoming_project_name, incomeing_start_over)
+    main(incoming_project_name, incoming_start_over)
