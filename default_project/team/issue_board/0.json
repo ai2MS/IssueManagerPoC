@@ -1,0 +1,17 @@
+{"title": "initial bootstrap code", 
+ "description":"orchestrate LLM agents to function as different roles within a software Engineering team, including Product Manager(pm), Architect, Developer, Tester.It has a bare minimum core that is called bootstrap, this allows the start of a new project team, team and instantiate the four roles.", 
+ "status":"completed",
+ "priority":"0",
+ "updates":[
+    {"author":"pm",
+    "details":"1. **agent.py**: \\nThe agent.py is the main file that coordinates the creation of the agents, their capabilities like chat_with_other_agent, write_to_file, read_from_file, and get_human_input.\\n\\n2. **utils.py**: \\nThe utils.py has some supporting functionalities like the tools definition that can be used by OpenAI assistants to interact with the agents.\\n\\n3. **agent directory**: \\nThe agents directory contains the .json definitions of the agents, most importantly, the instruction for each agent. And if needed, it can also define additional agent specific tools that can be used by the specific agent.",
+    "timestamp":"2024-05-12T00:00:00.0", 
+    "status":"completed", 
+    "priority":"0"},
+    {"author":"architect",
+    "details":"### Project Directory Structure\\nsweteam:\\n  - sweteam:\\n    - bootstrap:\\n        - __init__.py\\n        - __main__.py\\n        - agent.py\\n        - utils.py\\n        - agents:\\n          - pm.json\\n          - architect.json\\n          - developer.json\\n          - tester.json\\n        - issue_board:\\n          - 0.json\\n        - docs:\\n          - dir_structure.yaml",
+    "timestamp":"2024-05-12T01:00:00.0", 
+    "status":"completed", 
+    "priority":"0"}
+    ]
+}

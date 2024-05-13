@@ -72,7 +72,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             import importlib
             sys.path.insert(0, project_dir)
             actual_project = importlib.import_module(project_name)
-            actual_project.team.load_agents()
+            actual_project.load_agents()
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:
             logger.error(f"{project_name} agents run into errors {e}.")
