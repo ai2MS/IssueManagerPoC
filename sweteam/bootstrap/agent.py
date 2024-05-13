@@ -7,7 +7,7 @@ import ollama
 from openai import OpenAI, AzureOpenAI
 import yaml
 from .utils import current_directory, standard_tools
-from . import logger, agents
+from . import logger, agents, msg_logger
 
 class Ollama_Agent:
     llm_service = ollama
@@ -252,7 +252,7 @@ class OpenAI_Agent:
         else:
             contents
 
-    def perform_task(self, task: str = None) -> dict:
+    def perform_task(self, task: str = None, from_: str = "Unknown") -> dict:
         """
         Perform a job using the OpenAI Assistant.
 
@@ -281,17 +281,20 @@ class OpenAI_Agent:
             assistant_id=self.assistant.id,
             timeout=300
         )
+        msg_logger.info(f"{from_} -> {self.name} - {task}")
         result = {}
         while self.run.status in ["queued", "in_progress", "requires_action"]:
             logger.debug(f"<{self.name}>-{self.run.status=}")
             if self.run.status == "requires_action":
                 required_actions = self.run.required_action.submit_tool_outputs.model_dump()
-                logger.info(f"<{self.name}> TASK:STEP -tool_calls: {required_actions}")
+                logger.debug(f"<{self.name}> TASK:STEP -tool_calls: {required_actions}")
                 tools_output = []
                 for action in required_actions["tool_calls"]:
                     func_name = action["function"]["name"]
                     arguments = json.loads(action["function"]["arguments"])
                     func_names = [item['function']['name'] for item in self.tools if item['type'] == 'function']
+                    msg_logger.info(f"{self.name} -> {func_name} {arguments}")
+                    logger.debug(f"<{self.name}> TASK:STEP -tool_call_id: {action['id']}- {func_name} {arguments}")
                     if func_name in func_names:
                         func = getattr(self, func_name, None)
                         logger.debug(f"<{self.name}> -will call tool {func_name} with arguments {arguments}")
@@ -316,9 +319,11 @@ class OpenAI_Agent:
                         tool_outputs=tools_output
                         )
                     except Exception as e:
-                        logger.error(f"<{self.name}> TASK:STEP -Failed to submit tool outputs:", e)
+                        logger.error(f"<{self.name}> TASK:STEP -Failed to submit tool outputs:{e}")
+                        msg_logger.error(f"{func_name} -> {self.name} - {tools_output}")
                     else:
                         logger.info(f"<{self.name}> TASK:STEP -Tool outputs submitted successfully.")
+                        msg_logger.info(f"{func_name} -> {self.name} - {tools_output}")
 
             time.sleep(0.5)
             self.run = self.llm_client.beta.threads.runs.retrieve(

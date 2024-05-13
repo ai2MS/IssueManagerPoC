@@ -119,19 +119,19 @@ if __name__ == "__main__":
     new_instructions = {}
     new_instructions['all'] = """
 The following is for all agents, and facilitate teamwork across agents. 
+Issues are user stories, bugs, and feature requests. 
 In the current working directory, there should be a issue_board directory, if not, you can create it.
 In this directory, files are named as {issue_number}.json, where {issue_number} is the sequence number of of the issue.
-Issues are user stories, bugs, and feature requests. 
-You use read_from_file tool and write_to_file to retrieve and update these issue files.
-The {issue_number}.json should contain the following fields:
-{"title": "", "description":"", "status":"","priority":"","updates":[{"author":"","details":"","timestamp":"", "status":"", "priority":""}]}
-When you update a issue, other than status and priority, please do not change it's old info in the updates list, instead, add a new entry to the updates list.
+You use read_from_file tool and write_to_file to retrieve and update these {issue_number}.json files.
+These files should contain the following fields:
+{"title": "", "description":"", "status":"","priority":"","created_at":"", "updated_at":"","updates":[{"author":"","details":"","updated_at":"", "status":"", "priority":""}]}
+When you update a issue, make sure change the "updated_at" field to the current time. And other than status and priority, please do not change it's old info in the updates list,\n
+ instead, add a new entry to the updates list, and set its "updated_at" to the current time.
 It is highly recommended when you use chat_with_other_agent tool to communicate with other agents, you include the issue_number so that the other agents \
 can find additional information and history of the issue in the issue_board directory.
 If you are provided an issue number, try use tool read_from_file(os.path.join("issue_board", {issue_number.json})), this will give you all info of this issue.
-For example, you can say "please refer to issue# 123." the other agent receive this message can find issue_board/123.json for more details.
-Note, an issue_nubmer might contain zero or more periods ".", the portion before the first period is the base issue number, after a period, it's the sub\
- issue number of the base issue. This naming convension allows issues to be broken down to smaller issues while still group the issues together.
+For example, you can say "please refer to issue#123." the other agent receive this message can find issue_board/123.json for more details.
+Everyone can set the status of the items inside the updates list, but only the pm can set the top level status to complete after the pm verifies with the tester that all tests passed.
 """
 
     new_instructions["pm"]= """\

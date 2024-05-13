@@ -1,19 +1,22 @@
 """
-Bootstrap a new software engineering project.
+This is the entry point of a software engineering project. 
 
-This is the initial point of a software engineering project. 
 The new piradigm is to have new software all "self-writen" and evolve by itself.
 This means software are going to update themselves to evolve instead of relying on
 some other agents human or AI developers. 
-This in turn means this piece of software will evolve the software development 
-capabilities that only needed by this project, instead of having to acquire full
-software development capability. 
+
+This module has two models, when called as Bootstrap, it creates a new software engineering project. 
+when called as a project/team it continue an existing software project.
 
 Usage:
     python -m sweteam.bootstrap [-p project_name] [-n]
     project_name is what the actual project should be called, if not provided, its "default", you can also set PROJECT_NAME environment variable for this
     -n will remove old project dir and start a new one with that name, so be careful using this option.
 
+    or 
+
+    python -m default_project.team
+    all arguments are ignored, this will continue the previously setup project
 """
 
 import logging
@@ -34,15 +37,23 @@ match os.environ.get("LOG_LEVEL"):
         logger.setLevel(logging.INFO)
         
 console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
 c_format = logging.Formatter('%(levelname)s - %(name)s - %(message)s')
 console_handler.setFormatter(c_format)
 logger.addHandler(console_handler)
 
-my_name = __package__.split(".")[-1]
+my_name = __package__.split(".")[0]
 file_handler = logging.FileHandler(f"{my_name}.log")
 f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 file_handler.setFormatter(f_format)
 logger.addHandler(file_handler)
+
+msg_logger = logging.getLogger("message_log")
+msg_file_handler = logging.FileHandler(f"{my_name}_messages.log")
+msg_file_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+msg_file_handler.setFormatter(msg_file_format)
+msg_logger.addHandler(msg_file_handler)
+msg_logger.setLevel(logging.INFO)
 
 agents = []
 
