@@ -32,6 +32,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
         Exception: If there is an error creating the project directory.
     """
     EMBEDDED_DEV_TEAM_NAME = "embedded_dev_team"
+    new_branch_name = ''
     if __package__ and __package__.endswith("bootstrap"):
         try:
             current_file = os.path.realpath(__file__)
@@ -80,17 +81,24 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:
             logger.error(f"{project_name} agents run into errors {e}.")
-            response = input(f"{project_name} agents run into errors, do you want to drop the new git branch {new_branch_name}?")
-            if response.lower() in ["y", "yes"]:
-                subprocess.run(['git', 'reset', '--hard'], capture_output=True, text=True)
-                subprocess.run(['git', 'checkout', old_branch_name], capture_output=True, text=True)
-                subprocess.run(['git', 'branch', '-D', new_branch_name], capture_output=True, text=True)
+            if new_branch_name:
+                response = input(f"{project_name} agents run into errors, do you want to drop the new git branch {new_branch_name}?")
+                if response.lower() in ["y", "yes"]:
+                    subprocess.run(['git', 'reset', '--hard'], capture_output=True, text=True)
+                    subprocess.run(['git', 'checkout', old_branch_name], capture_output=True, text=True)
+                    subprocess.run(['git', 'branch', '-D', new_branch_name], capture_output=True, text=True)
 
     else:
         # if invoke the project.team instead of the bootstrap
+        current_file = os.path.realpath(__file__)
+        current_dir = os.path.dirname(current_file)
+        current_parent_dir = os.path.dirname(current_dir)
+        project_dir = current_parent_dir
+
         try:
             current_git_branch = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True)
             logger.debug(f"Currently on branch {current_git_branch}")
+            os.chdir(project_dir)
             if (current_git_branch in ["main", "master"]):
                 logger.fatal(f"??Currently on branch <{current_git_branch}>, we shall never change it without a PR. \nPlease create a new branch or switch to one of the following branches...")
                 all_branches = subprocess.run(['git', 'branch', '--list'], capture_output=True, text=True)

@@ -42,6 +42,7 @@ c_format = logging.Formatter('%(levelname)s - %(name)s - %(message)s')
 console_handler.setFormatter(c_format)
 logger.addHandler(console_handler)
 
+
 my_name = __package__.split(".")[0]
 file_handler = logging.FileHandler(f"{my_name}.log")
 f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
@@ -49,11 +50,12 @@ file_handler.setFormatter(f_format)
 logger.addHandler(file_handler)
 
 msg_logger = logging.getLogger("message_log")
-msg_file_handler = logging.FileHandler(f"{my_name}_messages.log")
-msg_file_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-msg_file_handler.setFormatter(msg_file_format)
-msg_logger.addHandler(msg_file_handler)
-msg_logger.setLevel(logging.INFO)
+if __package__ and not __package__.startswith("sweteam"):
+    msg_file_handler = logging.FileHandler(f"{my_name}_messages.log")
+    msg_file_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    msg_file_handler.setFormatter(msg_file_format)
+    msg_logger.addHandler(msg_file_handler)
+    msg_logger.setLevel(logging.INFO)
 
 agents = []
 
@@ -61,6 +63,8 @@ agents = []
 def load_agents():
     global agents
     from . import agent
+    if __package__.startswith("sweteam"):
+        print(f"Warning, Current package name: {__package__}")
     agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
     logger.debug(f"package name: {__package__}")
     if (my_name != 'bootstrap'):
@@ -76,5 +80,5 @@ def load_agents():
             
             prompt = "Check the issue_board directory for issues with status in ['new', 'work in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
             while pm and prompt:
-                pm.perform_task(prompt)
+                pm.perform_task(prompt, 'Initializing')
                 prompt = input("\n***Please follow up, or just press enter to finish this session:\n")

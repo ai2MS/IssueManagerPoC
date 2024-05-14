@@ -62,6 +62,38 @@ standard_tools = [
         {
           "type": "function",
           "function": {
+            "name": "execute_module",
+            "description": "Write the content to a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "module_name": {
+                  "type": "string",
+                  "description": "The name of the module that includes the function to be executed."
+                },
+                "method_name": {
+                  "type": "string",
+                  "description": "The function or method to be executed."
+                },
+                "args": {
+                  "type": "array",
+                  "items" : {
+                    "type": "string"
+                  },
+                  "description": "Positional arguments to be used for this particular run."
+                },
+                "kwargs": {
+                  "type": "object",
+                  "description": "Keyword, aka named arguments to be used for this particular run."
+                }
+              },
+              "required": ["module_name","method_name"]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
             "name": "get_human_input",
             "description": "Receive user input of initial requirement, or ask users for follow up clarification questions about the request.",
             "parameters": {
@@ -221,7 +253,8 @@ You should work with the architect on the directory structure of the project, th
 This dir_structure.yaml file might not contain the test files though, so you can update this file with your design of test files.
 You can use the write_to_file tool to write each test case file and other supporting files to the project, test cases should closely shadow each module file that it tests.
 When executing tests, You should try run the docstring doctest for all the packages, modules, classes, functions, methods the developer wrote first,\
- and then execute your test cases using pytest.
+ and then execute your test cases using execute_module tool. For example you can call agent.execute_module('utils', 'current_directory') to test \n
+ the current_directory function in the utils module.
 You might also be asked to help debug issues, make sure ask for the issue number. When debugging, you should run the code against the test cases, and\
  caputre the error message and send it to the developer via the chat_with_other_agent tool.
 """
