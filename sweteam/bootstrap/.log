@@ -197,3 +197,139 @@ AttributeError: module 'utils' has no attribute 'current_dir'
 2024-05-14 05:17:59,707 - ERROR - __init__ - <self.name> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
 2024-05-14 05:17:59,707 - INFO - __init__ - Initializing agent tester
 2024-05-14 05:17:59,707 - INFO - __init__ - tester -wrote deleteme.test
+2024-05-15 04:09:15,664 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,664 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,664 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,665 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,686 - ERROR - __init__ - <tester> execute_module -Execution returned non-0 exit code. Error: /workspaces/sweteam/.venv/bin/python: No module named pwd *() 
+
+2024-05-15 04:09:15,686 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,738 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,739 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,739 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:09:15,739 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:09:15,740 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:11:29,843 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,843 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,844 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,844 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,861 - ERROR - __init__ - <tester> execute_module -Execution returned non-0 exit code. Error: /workspaces/sweteam/.venv/bin/python: No module named pwd *() 
+
+2024-05-15 04:11:29,862 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,905 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,906 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,906 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:11:29,907 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:29,907 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:11:59,882 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,882 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,882 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,883 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,903 - ERROR - __init__ - <tester> execute_module -Execution returned non-0 exit code. Error: /workspaces/sweteam/.venv/bin/python: No module named pwd *() 
+
+2024-05-15 04:11:59,905 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,951 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,952 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,952 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:11:59,953 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:11:59,953 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:13:14,840 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,840 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,840 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,841 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,857 - ERROR - __init__ - <tester> execute_module -Execution returned non-0 exit code. Error: /workspaces/sweteam/.venv/bin/python: No module named pwd *() 
+
+2024-05-15 04:13:14,858 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,904 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,905 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,905 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:13:14,906 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:13:14,906 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:16:16,347 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,348 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,348 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,348 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,370 - ERROR - __init__ - <tester> execute_module -Execution returned non-0 exit code. Error: /workspaces/sweteam/.venv/bin/python: No module named pwd *() 
+
+2024-05-15 04:16:16,371 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,419 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,421 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,421 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:16:16,422 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:16,422 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:16:51,246 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,246 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,247 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,247 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,263 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,332 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,334 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,335 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:16:51,335 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:16:51,336 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:17:31,372 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,372 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,372 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,373 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,376 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,421 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,422 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,423 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:17:31,423 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:31,423 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:17:48,845 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,845 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,846 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,846 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,849 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,896 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,897 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,897 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:17:48,898 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:17:48,898 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:18:41,448 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,449 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,449 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,450 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,454 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,476 - ERROR - __init__ - <tester> execute_module -Execution returned non-0 exit code. Error: Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+AttributeError: 'float' object has no attribute 'strip'
+
+2024-05-15 04:18:41,503 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,504 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,504 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:18:41,504 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:18:41,504 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:19:14,248 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,249 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,249 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,249 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,253 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,295 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,296 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,296 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:19:14,297 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:19:14,297 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:24:20,347 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,347 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,348 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,348 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,350 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,370 - ERROR - __init__ - <tester> execute_module -Execution failed. Error: module 'json' has no attribute 'loads0'
+2024-05-15 04:24:20,390 - ERROR - __init__ - <tester> execute_module -Execution failed. Error: module 'json' has no attribute 'loads0'
+2024-05-15 04:24:20,391 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,392 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,392 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:24:20,392 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:20,393 - INFO - __init__ - <tester> -wrote deleteme.test
+2024-05-15 04:24:36,650 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,651 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,651 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,651 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,654 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,699 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,700 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,701 - ERROR - __init__ - <tester> - Failed to read file non-existant.file, received Error [Errno 2] No such file or directory: 'non-existant.file'.
+2024-05-15 04:24:36,701 - INFO - __init__ - Initializing agent tester
+2024-05-15 04:24:36,701 - INFO - __init__ - <tester> -wrote deleteme.test

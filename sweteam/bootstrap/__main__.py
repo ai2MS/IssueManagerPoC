@@ -72,11 +72,10 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             exit(101)
         
         try:
-            os.chdir(parent_dir)
             import importlib
             sys.path.insert(0, project_dir)
-            actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
             os.chdir(project_dir)
+            actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
             actual_project_team.load_agents()
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:

@@ -324,7 +324,7 @@ class OpenAI_Agent:
 
         """
         retry_count = int(os.environ.get("RETRY_COUNT", 3))
-        logger.info(f"<{self.name}> TASK:BEGIN -{task}")
+        logger.info(f"<{self.name}> TASK:BEGIN from:{from_} - task:{task} - retries left:{retry_count}")
         if not task:
             task = self.instruction
 
@@ -351,21 +351,21 @@ class OpenAI_Agent:
                     arguments = json.loads(action["function"]["arguments"])
                     func_names = [item['function']['name'] for item in self.tools if item['type'] == 'function']
                     msg_logger.info(f"{self.name} -> {func_name} {arguments}")
-                    logger.debug(f"<{self.name}> TASK:step -tool_call_id: {action['id']}- {func_name} {arguments}")
+                    logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
                     if func_name in func_names:
                         func = getattr(self, func_name, None)
-                        logger.debug(f"<{self.name}> TASK:step -willing tool {func_name} with arguments {arguments}")
+                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -willing tool {func_name} with arguments {arguments}")
                         output = func(**arguments)
-                        logger.debug(f"<{self.name}> TASK:step-tool {func_name} returned {output}")
+                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} {func_name} returned {output}")
                         if output is not None:  # Check if output is not None
                             tools_output.append({
                                 "tool_call_id": action["id"],
                                 "output": output
                             })
                         else:
-                            logger.warning(f"<{self.name}> TASK:STEP -Function {func_name} returned None")
+                            logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
                     else:
-                        logger.warning(f"<{self.name}> TASK:STEP -Function not found")
+                        logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
                     
                 if tools_output:
                     tools_output_head = ''
@@ -374,7 +374,7 @@ class OpenAI_Agent:
                         tools_output_head = tools_output_1st['output']
                     else:
                         tools_output_head = tools_output_1st
-                    logger.info(f"<{self.name}> TASK:STEP -Function {func_name} returned {str(tools_output_head):.32s}...")
+                    logger.info(f"<{self.name}> TASK:STEPs -Function {func_name} returned {str(tools_output_head):.32s}...")
                     try:
                         self.run = self.llm_client.beta.threads.runs.submit_tool_outputs_and_poll(
                         thread_id=self.thread.id,
@@ -394,7 +394,7 @@ class OpenAI_Agent:
                 run_id=self.run.id,
             )
             if self.run.status in ["expiried", "failed"]:
-                logger.warning(f"<{self.name}> TASK:END -run.status is {self.run.status}. retrying...")
+                logger.warning(f"<{self.name}> TASK: run status is {self.run.status}, this is unexpected. retrying...")
                 retry_count -= 1
                 if retry_count > 0:
                     self.run = self.llm_client.beta.threads.runs.create(
@@ -415,7 +415,7 @@ class OpenAI_Agent:
         else: 
             logger.warning(f"OpenAI run returned status {self.run.status} which is unexpected at this stage.")
 
-        logger.info(f"<{self.name}> TASK:END -result:{json.dumps(result, indent=4)}")
+        logger.info(f"<{self.name}> TASK:END from:{from_} -result:{json.dumps(result, indent=4)}")
 
         return result and result.get("Assistant")
 
@@ -428,7 +428,7 @@ class OpenAI_Agent:
         Returns:
             str that the user entered into the input() function
         """
-        logger.debug(f"get_human_input {prompt}")
+        logger.debug(f"<{self.name}> - get_human_input({prompt})")
         if prompt:
             result = input(f"\n***************User Input Needed***************\n{prompt}:")
         else:
@@ -445,7 +445,7 @@ class OpenAI_Agent:
         Returns:
             str: the response from the agent
         """
-        logger.debug(f"chat_with_other_agent {agent_name} {message}")
+        logger.debug(f"<self.name> - chat_with_other_agent({agent_name},{message})")
         the_other_agent = [a for a in agents if a.name==agent_name][0]
         if the_other_agent:
             chat_result = the_other_agent.perform_task(message, self.name)
@@ -453,7 +453,7 @@ class OpenAI_Agent:
         else:
             raise Exception(f"Agent {agent_name} not found")
 
-    def execute_module(self, module_name: str, method_name: str, *args, **kwargs) -> dict[str, any]:
+    def execute_module(self, module_name: str, method_name: str = None, *args, **kwargs) -> dict[str, any]:
         """Execute a specified method from a Python module.
 
         Args:
@@ -476,27 +476,78 @@ class OpenAI_Agent:
 
         """
         # Prepare the command to execute
-        python_command = f"import json, {module_name};" \
-                        "output={};" \
-                        f"output['output'] = getattr({module_name}, '{method_name}')(*{args}, **{kwargs}); " \
-                        "print(json.dumps(output))"
-        logger.debug(f"<{self.name}> TASK:STEP -Executing {python_command}")
+        if method_name:
+            python_command = f"import json, {module_name};" \
+                              "output={};" \
+                             f"output['output'] = getattr({module_name}, '{method_name}')(*{args}, **{kwargs}); " \
+                             "print(json.dumps(output))"
+            python_mode = "-c"
+        else:
+            python_command =  f"{module_name} *{args} " 
+            python_mode = "-m"
+
+        logger.debug(f"<{self.name}> execute_module - Executing {python_command}")
         # Execute the command as a subprocess
         try:
-            result = subprocess.run(['python', '-c', python_command],
-                                    capture_output=True, text=True, timeout=120)
+            result = subprocess.run(['python', python_mode, python_command],
+                                    capture_output=True, text=True, check=False, shell=False, timeout=120)
             if result.returncode == 0:
-                return json.loads(result.stdout)
+                logger.debug(f"<{self.name}> execute_module -Execution returned 0 exit code")
+                if method_name:
+                    return json.loads(result.stdout)
+                else:
+                    return {'output':result.stdout.strip(),'error': None}
             else:
-                logger.error(f"<{self.name}> TASK:STEP -Execution failed. Error: {result.stderr}")
-                return {'output':f'Execution finished with error: {e}','error': result.stderr}
+                logger.error(f"<{self.name}> execute_module -Execution returned non-0 exit code. Error: {result.stderr}")
+                return {'output':f'Execution finished with error: {result.stderr}','error': result.stderr}
+        except subprocess.CalledProcessError as e:
+            logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
+            return {'output':f'Execution failed with error: {e}','error': f'{e.stderr}'}
         except subprocess.TimeoutExpired:
-            logger.error(f"<{self.name}> TASK:STEP -Execution failed. Error: timeout")
+            logger.error(f"<{self.name}> execute_module -Execution failed. Error: timeout")
             return {'output':f'Execution timed out, if this happens often, please check if this module execution is hang.','error': 'Execution timed out'}
         except Exception as e:
-            logger.error(f"<{self.name}> TASK:STEP -Execution failed. Error: {e}")
+            logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
             return {'output':f'Execution failed with error: {e}','error': str(e)}
 
+    def execute_command(self, command_name: str, *args: list[str]) -> dict[str]:
+        """Execute a specified method from a Python module.
+
+        Args:
+            command_name: Name of the module to execute.
+            args: Arguments for the method.
+        
+        Returns: 
+            A dictionary with 'output' or 'error' as a key.
+
+        Example::
+            >>> agent = OpenAI_Agent("tester")
+            >>> result = agent.execute_command('echo', 'hello', 'world')
+            >>> result['output']
+            'hello world\\n'
+            >>> result = agent.execute_command('pwd')
+            >>> result['output'] == os.getcwd() + '\\n'
+            True
+        """
+
+        # Execute the command as a subprocess
+        try:
+            result = subprocess.run([command_name, *args],
+                                    capture_output=True, text=True, check=False, shell=False, timeout=120)
+            if result.returncode == 0:
+                return {'output':result.stdout}
+            else:
+                logger.error(f"<{self.name}> execute_command -Execution returned non-0 exit code. Error: {result.stderr}")
+                return {'output':f'Execution finished with error: {result.stderr}','error': result.stderr}
+        except subprocess.CalledProcessError as e:
+            logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
+            return {'output':f'Execution failed with error: {e}','error': f'{e.stderr}'}
+        except subprocess.TimeoutExpired:
+            logger.error(f"<{self.name}> execute_command -Execution failed. Error: timeout")
+            return {'output':f'Execution timed out, if this happens often, please check if this module execution is hang.','error': 'Execution timed out'}
+        except Exception as e:
+            logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
+            return {'output':f'Execution failed with error: {e}','error': str(e)}
 
     def write_all_files_to_temp_dir(self, thread: str, output_path: str = '/tmp'):
         """save OpenAI tools_resources files locally"""
