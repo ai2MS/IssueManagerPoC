@@ -79,7 +79,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             actual_project_team.load_agents()
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:
-            logger.error(f"{project_name} agents run into errors {e}.")
+            logger.error(f"{project_name} agents run into errors {e}. stack: {str(e)}")
             if new_branch_name:
                 response = input(f"{project_name} agents run into errors, do you want to drop the new git branch {new_branch_name}?")
                 if response.lower() in ["y", "yes"]:

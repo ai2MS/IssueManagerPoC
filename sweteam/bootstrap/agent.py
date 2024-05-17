@@ -88,7 +88,7 @@ class OpenAI_Agent:
         self.file_name = __file__
         self.name = agent_name
         if agent_dir is None:
-            agent_dir = os.path.join(current_directory(), "agents")
+            agent_dir = os.path.join(os.path.dirname(__file__), "agents")
         try:
             config_json = os.path.join(agent_dir, f"{agent_name}.json")
             agent_config = json.load(open(config_json))
@@ -192,6 +192,104 @@ class OpenAI_Agent:
         """Allow printing of myself (source code)"""
         return f"<Agent: {self.name}>" #json.dumps(self.my_own_code())
 
+    # method to list/read/write issues
+    def issue_manager(self, action: str, issue: str = '', only_in_state: list = [], content: str = None):
+        ISSUE_BOARD_DIR = "issue_board"
+        content_obj = {}
+        if content:
+            try:
+                content_obj = json.loads(content)
+            except Exception as e:
+                return ("Error parsing {content}, please make sure content is a proper json object.")
+        match action:
+            case "list":
+                issue_dir = ISSUE_BOARD_DIR
+                results = []
+                for root, dirs, files in os.walk(issue_dir):
+                    for file in files:
+                        if file.endswith('.json'):
+                            file_path = os.path.join(root, file)
+                            issue_number = file.removesuffix('.json')
+                            try:
+                                if issue and file != f"{issue}.json" and not root.endswith(issue):
+                                    # if issue is not empty, then only keep issue.json and dir that match issue
+                                    continue
+                                with open(file_path, 'r') as f:
+                                    data = json.load(f)
+                                updates = data.get('updates', [])
+                                updates.sort(key=lambda x: x.get('update at',0), reverse=True)
+                                if updates:
+                                    status = updates[0].get('status', 'new')
+                                    priority = updates[0].get('priority', '0')
+                                else:
+                                    status = data.get('status', 'new')
+                                    priority = data.get('priority', '0')
+                                if only_in_state and status not in only_in_state:
+                                    continue
+                                if issue and issue_number != issue:
+                                    continue
+                                results.append({'issue_number':issue_number, 'priority':priority, 'status':status})
+                            except json.JSONDecodeError:
+                                logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
+                                results.append({"issue":issue_number, "status":f"Error Decoding Json"})
+                            except FileNotFoundError:
+                                logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error file not found: {file_path}")
+                                results.append({"issue":issue_number, "status":f"Error file not found"})
+                            except Exception as e:
+                                logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
+                                results.append({"issue":issue_number, "status":f"Error {e}"})
+                return f"{results}"
+            case "create":
+                try:    
+                    if not os.path.exists(ISSUE_BOARD_DIR):
+                        os.makedirs(ISSUE_BOARD_DIR)
+                    if issue:
+                        issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
+                        if not os.path.exists(issue_dir):
+                            os.makedirs(issue_dir, exist_ok=True)
+                        existing_issues = [file.removesuffix('.json') for file in os.listdir(issue_dir) if file.endswith('.json')]
+                        new_issue_number = f"{issue}/{max([int(issue_number_str) for issue_number_str in existing_issues if issue.isdigit()], default=0) + 1}"
+                    else:
+                        existing_issues = [file.removesuffix('.json') for file in os.listdir(ISSUE_BOARD_DIR) if file.endswith('.json')]
+                        new_issue_number = max([int(issue_number_str) for issue_number_str in existing_issues if issue.isdigit()], default=0) + 1
+                    if 'created_at' not in content_obj:
+                        content_obj['created_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+                    result = self.write_to_file(os.path.join(ISSUE_BOARD_DIR, f"{new_issue_number}.json"), json.dumps(content_obj))
+                except Exception as e:
+                    logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: s{e.__traceback__.tb_lineno}")
+                    result = f"Error creating issue {new_issue_number}. Error: {e}"
+                return "issue" + result.removesuffix('.json*').removeprefix(f"File {ISSUE_BOARD_DIR}") + " created"
+            case "read":
+                try:
+                    read_result = json.loads(self.read_from_file(os.path.join(ISSUE_BOARD_DIR, f"{issue}.json")))
+                    if 'content' in read_result:
+                        result = read_result.get("content", "")
+                    else:
+                        result = ""
+                except Exception as e:
+                    logger.error(f"<{self.name}> issue_manager/read issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
+                    result = f"Error Reading issue {issue} - Error: {e}"
+                return result
+            case "update":
+                try:
+                    issue_read = json.loads(self.read_from_file(os.path.join(ISSUE_BOARD_DIR, f"{issue}.json")))
+                    issue_content = json.loads(issue_read.get("content","{}"))
+                    if content_obj and "updated_at" in content_obj:
+                        content["updated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+                    if content_obj and "author" in content_obj:
+                        content_obj["author"] = self.name
+                    if issue_content and "updates" in issue_content:
+                        issue_content["updates"].append(content_obj)
+                    else:
+                        issue_content["updates"] = [content_obj]
+                    result = self.write_to_file(os.path.join(ISSUE_BOARD_DIR, f"{issue}.json"), json.dumps(issue_content))
+                except Exception as e:
+                    logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
+                    result = f"Error Updating issue {issue} - Error: {e}"
+                return "issue" + result.removesuffix('.json*').removeprefix("File ") + " created"
+            case _:
+                return (f"Invalid action: {action}")
+            
     # the following are function tools for OpenAI assistants.
     def read_from_file(self, filename: str = None) -> str:
         """Return the content of a given file.
@@ -224,7 +322,7 @@ class OpenAI_Agent:
                 "content": content,
             }
         except Exception as e:
-            logger.error(f"<{self.name}> - Failed to read file {filename}, received Error {e}.")
+            logger.warning(f"<{self.name}> - Failed to read file {filename}, received Error {e}.")
             content = f"{e}"
             result = {
                 "filename": filename,
@@ -327,17 +425,27 @@ class OpenAI_Agent:
         logger.info(f"<{self.name}> TASK:BEGIN from:{from_} - task:{task} - retries left:{retry_count}")
         if not task:
             task = self.instruction
+        try:
+            # making sure wait until other runs are no longer active before creating new one
+            wait_other_runs_timeout = 300
+            for run_ in self.llm_client.beta.threads.runs.list(thread_id=self.thread.id):
+                while run_.status in ['active'] and (wait_other_runs_timeout := wait_other_runs_timeout - 1) > 0:
+                    logger.debug(f"<{self.name}> TASK:PREP - {self.thread.id} - {run_.id} - {run_.status}")
+                    time.sleep(1)
 
-        message = self.llm_client.beta.threads.messages.create(
-            thread_id=self.thread.id,
-            role="user",
-            content=task
+            message = self.llm_client.beta.threads.messages.create(
+                thread_id=self.thread.id,
+                role="user",
+                content=task
+                )
+            self.run = self.llm_client.beta.threads.runs.create(
+                thread_id=self.thread.id,
+                assistant_id=self.assistant.id,
+                timeout=300
             )
-        self.run = self.llm_client.beta.threads.runs.create(
-            thread_id=self.thread.id,
-            assistant_id=self.assistant.id,
-            timeout=300
-        )
+        except Exception as e:
+            logger.warning(f"<{self.name}> TASK:STEP - tool func perform_task run into error {e}")
+            return f"{e}"
         msg_logger.info(f"{from_} >> {self.name} - {task}")
         result = {}
         while self.run.status in ["queued", "in_progress", "requires_action"]:
@@ -354,7 +462,7 @@ class OpenAI_Agent:
                     logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
                     if func_name in func_names:
                         func = getattr(self, func_name, None)
-                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -willing tool {func_name} with arguments {arguments}")
+                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
                         output = func(**arguments)
                         logger.debug(f"<{self.name}> TASK:STEP-{action['id']} {func_name} returned {output}")
                         if output is not None:  # Check if output is not None
@@ -366,6 +474,10 @@ class OpenAI_Agent:
                             logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
                     else:
                         logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
+                        tools_output.append({
+                            "tool_call_id": action["id"],
+                            "output": f"Function {func_name} not a configured tool."
+                        })
                     
                 if tools_output:
                     tools_output_head = ''
@@ -374,19 +486,39 @@ class OpenAI_Agent:
                         tools_output_head = tools_output_1st['output']
                     else:
                         tools_output_head = tools_output_1st
-                    logger.info(f"<{self.name}> TASK:STEPs -Function {func_name} returned {str(tools_output_head):.32s}...")
-                    try:
-                        self.run = self.llm_client.beta.threads.runs.submit_tool_outputs_and_poll(
-                        thread_id=self.thread.id,
-                        run_id=self.run.id,
-                        tool_outputs=tools_output
-                        )
-                    except Exception as e:
-                        logger.error(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}")
-                        msg_logger.error(f"{func_name} -> {self.name} - {tools_output} !!!received!!! {e}")
-                    else:
-                        logger.info(f"<{self.name}> TASK:STEPs -Tool outputs submitted successfully.")
-                        msg_logger.info(f"{func_name} -> {self.name} - {tools_output}")
+                    logger.info(f"<{self.name}> TASK:STEPs -Function(s) returned {str(tools_output_head):.32s}...")
+                    submit_retry_left = 2
+                    while submit_retry_left:=submit_retry_left-1 > 0:
+                        try:
+                            self.run = self.llm_client.beta.threads.runs.submit_tool_outputs_and_poll(
+                            thread_id=self.thread.id,
+                            run_id=self.run.id,
+                            tool_outputs=tools_output
+                            )
+                        except Exception as e:
+                            if submit_retry_left > 0:
+                                try:
+                                    self.run = self.llm_client.beta.threads.runs.retrieve(
+                                        thread_id=self.run.thread_id,
+                                        run_id=self.run.id,
+                                    )                   
+                                    logger.warn(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}, recreating the run to retry.")
+                                    if self.run.status in ["expired", "failed"]:
+                                        self.run = self.llm_client.beta.threads.runs.create(
+                                            thread_id=self.thread.id,
+                                            assistant_id=self.assistant.id,
+                                            timeout=300
+                                        )
+                                        logger.debug(f"<{self.name}> TASK:STEPs -Recreated run: {self.run.id}, new status: {self.run.status}")
+                                except Exception as err:
+                                    logger.error(f"<{self.name}> TASK:STEPs -Failed to recreate run: {err} -after- submitting tool_output receiving {e}.")
+                            else:
+                                logger.error(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}")
+                            msg_logger.error(f"{func_name} -> {self.name} - {tools_output} !!!received!!! {e}")
+                        else:
+                            logger.info(f"<{self.name}> TASK:STEPs -Tool outputs submitted successfully.")
+                            msg_logger.info(f"{func_name} -> {self.name} - {tools_output}")
+                            submit_retry_left = 0
 
             time.sleep(0.5)
             self.run = self.llm_client.beta.threads.runs.retrieve(
@@ -402,7 +534,7 @@ class OpenAI_Agent:
                         assistant_id=self.assistant.id,
                         timeout=300
                     )
-        logger.debug(f"<{self.name}> : -after while wait ... {self.run.status=}")
+        logger.debug(f"<{self.name}> : - terminal run status is:{self.run.status=}, token_count: {self.run.usage}")
         if self.run.status == 'completed':
             messages = self.llm_client.beta.threads.messages.list(
                 thread_id=self.run.thread_id
@@ -413,7 +545,7 @@ class OpenAI_Agent:
                 logger.debug(f"<{self.name}> : -run.status is completed - msg is -{role.capitalize()}: {content}")
                 result[role.capitalize()]=content
         else: 
-            logger.warning(f"OpenAI run returned status {self.run.status} which is unexpected at this stage.")
+            logger.warning(f"OpenAI run returned status {self.run.status} which is unexpected at this stage. next round will recreate a run.")
 
         logger.info(f"<{self.name}> TASK:END from:{from_} -result:{json.dumps(result, indent=4)}")
 
@@ -430,7 +562,7 @@ class OpenAI_Agent:
         """
         logger.debug(f"<{self.name}> - get_human_input({prompt})")
         if prompt:
-            result = input(f"\n***************User Input Needed***************\n{prompt}:")
+            result = input(f"\n***************<{self.name}> Needs User Input***************\n{prompt}:")
         else:
             result = input("The AI needs some input from you:")
         return result
@@ -445,15 +577,16 @@ class OpenAI_Agent:
         Returns:
             str: the response from the agent
         """
-        logger.debug(f"<self.name> - chat_with_other_agent({agent_name},{message})")
+        logger.debug(f"<{self.name}> - chat_with_other_agent({agent_name},{message})")
         the_other_agent = [a for a in agents if a.name==agent_name][0]
         if the_other_agent:
             chat_result = the_other_agent.perform_task(message, self.name)
-            return chat_result or chat_result['Assistant']
+
+            return f"{chat_result}"
         else:
             raise Exception(f"Agent {agent_name} not found")
 
-    def execute_module(self, module_name: str, method_name: str = None, *args, **kwargs) -> dict[str, any]:
+    def execute_module(self, module_name: str, method_name: str = None, args: list = [], **kwargs) -> dict[str, any]:
         """Execute a specified method from a Python module.
 
         Args:
@@ -467,10 +600,10 @@ class OpenAI_Agent:
 
         Example::
             >>> agent = OpenAI_Agent("tester")
-            >>> result = agent.execute_module('math', 'sqrt', 16)
+            >>> result = agent.execute_module('math', 'sqrt', args=[16])
             >>> result['output']
             4.0
-            >>> result = agent.execute_module('utils', 'current_directory')
+            >>> result = agent.execute_module('os', 'getcwd')
             >>> result['output'] ==  os.getcwd()
             True
 
@@ -494,23 +627,23 @@ class OpenAI_Agent:
             if result.returncode == 0:
                 logger.debug(f"<{self.name}> execute_module -Execution returned 0 exit code")
                 if method_name:
-                    return json.loads(result.stdout)
+                    return result.stdout
                 else:
-                    return {'output':result.stdout.strip(),'error': None}
+                    return result.stdout.strip()
             else:
                 logger.error(f"<{self.name}> execute_module -Execution returned non-0 exit code. Error: {result.stderr}")
-                return {'output':f'Execution finished with error: {result.stderr}','error': result.stderr}
+                return f'Execution finished with error: {result.stderr}'
         except subprocess.CalledProcessError as e:
             logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
-            return {'output':f'Execution failed with error: {e}','error': f'{e.stderr}'}
+            return f'Execution failed with error: {e}'
         except subprocess.TimeoutExpired:
             logger.error(f"<{self.name}> execute_module -Execution failed. Error: timeout")
-            return {'output':f'Execution timed out, if this happens often, please check if this module execution is hang.','error': 'Execution timed out'}
+            return f'Execution timed out, if this happens often, please check if this module execution is hang.'
         except Exception as e:
             logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
-            return {'output':f'Execution failed with error: {e}','error': str(e)}
+            return f'Execution failed with error: {e}'
 
-    def execute_command(self, command_name: str, *args: list[str]) -> dict[str]:
+    def execute_command(self, command_name: str, args: list = []) -> dict[str]:
         """Execute a specified method from a Python module.
 
         Args:
@@ -522,32 +655,34 @@ class OpenAI_Agent:
 
         Example::
             >>> agent = OpenAI_Agent("tester")
-            >>> result = agent.execute_command('echo', 'hello', 'world')
-            >>> result['output']
+            >>> agent.execute_command('echo', args=['hello', 'world'])
             'hello world\\n'
             >>> result = agent.execute_command('pwd')
-            >>> result['output'] == os.getcwd() + '\\n'
+            >>> result == os.getcwd() + '\\n'
             True
+            >>> agent.execute_command('ls', args=['non-exist.dir'])
+            "Error: ls: cannot access 'non-exist.dir': No such file or directory\\n"
         """
 
         # Execute the command as a subprocess
         try:
             result = subprocess.run([command_name, *args],
                                     capture_output=True, text=True, check=False, shell=False, timeout=120)
+            logger.debug("<{self.name}> - execute_command -returned {result}.")
             if result.returncode == 0:
-                return {'output':result.stdout}
+                return result.stdout
             else:
                 logger.error(f"<{self.name}> execute_command -Execution returned non-0 exit code. Error: {result.stderr}")
-                return {'output':f'Execution finished with error: {result.stderr}','error': result.stderr}
+                return f"Error: {result.stderr}"
         except subprocess.CalledProcessError as e:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
-            return {'output':f'Execution failed with error: {e}','error': f'{e.stderr}'}
+            return f"error: {e.stderr}"
         except subprocess.TimeoutExpired:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: timeout")
-            return {'output':f'Execution timed out, if this happens often, please check if this module execution is hang.','error': 'Execution timed out'}
+            return f'Execution timed out, if this happens often, please check if this module execution is hang.'
         except Exception as e:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
-            return {'output':f'Execution failed with error: {e}','error': str(e)}
+            return f'Execution failed with error: {e}'
 
     def write_all_files_to_temp_dir(self, thread: str, output_path: str = '/tmp'):
         """save OpenAI tools_resources files locally"""

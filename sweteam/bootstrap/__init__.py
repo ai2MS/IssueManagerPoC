@@ -78,7 +78,9 @@ def load_agents():
             if not pm:
                 pm = agents[0]
             
-            prompt = "Check the issue_board directory for issues with status in ['new', 'work in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
+            prompt = "Check the issue_board directory for issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
+            round_name = "Initializing"
             while pm and prompt:
-                pm.perform_task(prompt, 'Initializing')
+                pm.perform_task(prompt, round_name)
                 prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
+                round_name = "Continuing"
