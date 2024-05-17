@@ -168,6 +168,10 @@ standard_tools = [
 def current_directory() -> str:
     """
     Returns the current working directory.
+
+    Example::
+        >>> import os; current_directory() == os.getcwd()
+        True
     """
     import os
     current_dir = os.getcwd()
@@ -175,15 +179,10 @@ def current_directory() -> str:
 
 
 if __name__ == "__main__":
-    print("local run of util in " + current_directory())
-    print(f"updating agents instructions as part of project setup. Should not be used in production")
-    import os
-    import json
-    agents_dir = os.path.dirname(__file__) + "/agents"
-    agents_list = [entry.removesuffix(".json") for entry in os.listdir(agents_dir) if entry.endswith(".json")]
     new_instructions = {}
     new_instructions['all'] = """
 The following is for all agents, and facilitate teamwork across agents. 
+The current working direcotry is the project root, all files should be saved relative to '.'. 
 Issues are user stories, bugs, and feature requests. 
 An issue can have sub issues, similar to directory structure, for example issue#123/1 and issue#123/2 are two children issues of issue#123 and issue#123/3/1 is a child of issue#123/3. 
 Sub issues allow you to break down a large issue to smaller issue that can be separately completed. 
@@ -308,6 +307,7 @@ Your output should be code if you have enough information. It is not allowed to 
 There is no need for you to report status of the issue because issue status tracking is done via issue_manager, and everyone can check\
  issue status using that tool, so "the issue is in progress" is a complete waste of resources, and you will be penalized for saying this kind of useless things.
 I emphasis, you should write code, and execute the code, until all of your code execute without errors. 
+The code you read and write are in the current working directory, you should consider "." as the project root for all of your code files.
 If you do not have enough information to complete the code, you can use the chat_with_other_agent tool to discuss with with the architect, or the pm.
 You may want to use list_dir() tool and read_from_file tool to read the current working code and combine that info with the issue description to\
  produce working changes. You should minimize code changes, properly leveraging existing code, and do not break existing code.
@@ -362,11 +362,25 @@ You might also be asked to help debug issues, make sure ask for the issue number
 In addition to write and execute the test cases, you should also help analyze the outcome and error messages to help ensure the software code written\
  by the developer works according to the software requirement specified by the pm and the architect.
 """
-    for agent_name in agents_list:
-        config_json = os.path.join(agents_dir, f"{agent_name}.json")
-        agent_config = json.load(open(config_json))
-        if new_instructions.get(agent_name):
-          agent_config["instruction"] = new_instructions[agent_name] + new_instructions["all"]
-          with open(config_json, "w") as f:
-              json.dump(agent_config, f, indent=4)
-    print("done")
+    import sys
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "update_agents":
+            print("local run of util in " + current_directory())
+            print(f"updating agents instructions as part of project setup. Should not be used in production")
+            import os
+            import json
+
+            agents_dir = os.path.dirname(__file__) + "/agents"
+            agents_list = [entry.removesuffix(".json") for entry in os.listdir(agents_dir) if entry.endswith(".json")]
+            for agent_name in agents_list:
+                config_json = os.path.join(agents_dir, f"{agent_name}.json")
+                agent_config = json.load(open(config_json))
+                if new_instructions.get(agent_name):
+                  agent_config["instruction"] = new_instructions[agent_name] + new_instructions["all"]
+                  with open(config_json, "w") as f:
+                      json.dump(agent_config, f, indent=4)
+            print("done")
+
+    import doctest
+    doctest.testmod()
+    sys.exit(0)

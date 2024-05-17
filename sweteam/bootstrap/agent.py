@@ -203,17 +203,14 @@ class OpenAI_Agent:
                 return ("Error parsing {content}, please make sure content is a proper json object.")
         match action:
             case "list":
-                issue_dir = ISSUE_BOARD_DIR
+                issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
                 results = []
                 for root, dirs, files in os.walk(issue_dir):
                     for file in files:
-                        if file.endswith('.json'):
+                        if file=='issue.json':
                             file_path = os.path.join(root, file)
-                            issue_number = file.removesuffix('.json')
+                            issue_number = root.removeprefix(ISSUE_BOARD_DIR+'/')
                             try:
-                                if issue and file != f"{issue}.json" and not root.endswith(issue):
-                                    # if issue is not empty, then only keep issue.json and dir that match issue
-                                    continue
                                 with open(file_path, 'r') as f:
                                     data = json.load(f)
                                 updates = data.get('updates', [])
@@ -226,9 +223,7 @@ class OpenAI_Agent:
                                     priority = data.get('priority', '0')
                                 if only_in_state and status not in only_in_state:
                                     continue
-                                if issue and issue_number != issue:
-                                    continue
-                                results.append({'issue_number':issue_number, 'priority':priority, 'status':status})
+                                results.append({'issue':issue_number, 'priority':priority, 'status':status})
                             except json.JSONDecodeError:
                                 logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
                                 results.append({"issue":issue_number, "status":f"Error Decoding Json"})
@@ -240,28 +235,29 @@ class OpenAI_Agent:
                                 results.append({"issue":issue_number, "status":f"Error {e}"})
                 return f"{results}"
             case "create":
-                try:    
-                    if not os.path.exists(ISSUE_BOARD_DIR):
-                        os.makedirs(ISSUE_BOARD_DIR)
-                    if issue:
-                        issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                        if not os.path.exists(issue_dir):
-                            os.makedirs(issue_dir, exist_ok=True)
-                        existing_issues = [file.removesuffix('.json') for file in os.listdir(issue_dir) if file.endswith('.json')]
-                        new_issue_number = f"{issue}/{max([int(issue_number_str) for issue_number_str in existing_issues if issue.isdigit()], default=0) + 1}"
-                    else:
-                        existing_issues = [file.removesuffix('.json') for file in os.listdir(ISSUE_BOARD_DIR) if file.endswith('.json')]
-                        new_issue_number = max([int(issue_number_str) for issue_number_str in existing_issues if issue.isdigit()], default=0) + 1
+                try:
+                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
+                    if not os.path.exists(issue_dir):
+                        os.makedirs(issue_dir, exist_ok=True)
+                    existing_sub_issues = [entry.name for entry in os.scandir(issue_dir) 
+                                        if entry.is_dir() 
+                                        and entry.name.isdigit() 
+                                        and os.path.exists(os.path.join(issue_dir, 'issue.json'))] 
+                    new_issue_number = os.path.join(issue,
+                                        f"{max([int(issue_str) for issue_str in existing_sub_issues], default=0) + 1}")
                     if 'created_at' not in content_obj:
                         content_obj['created_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    result = self.write_to_file(os.path.join(ISSUE_BOARD_DIR, f"{new_issue_number}.json"), json.dumps(content_obj))
+                    issue_file = os.path.join(issue_dir, new_issue_number,'issue.json')
+                    result = self.write_to_file(issue_file, json.dumps(content_obj))
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: s{e.__traceback__.tb_lineno}")
                     result = f"Error creating issue {new_issue_number}. Error: {e}"
                 return "issue" + result.removesuffix('.json*').removeprefix(f"File {ISSUE_BOARD_DIR}") + " created"
             case "read":
                 try:
-                    read_result = json.loads(self.read_from_file(os.path.join(ISSUE_BOARD_DIR, f"{issue}.json")))
+                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
+                    issue_file = os.path.join(issue_dir, 'issue.json')
+                    read_result = json.loads(self.read_from_file(issue_file))
                     if 'content' in read_result:
                         result = read_result.get("content", "")
                     else:
@@ -272,17 +268,19 @@ class OpenAI_Agent:
                 return result
             case "update":
                 try:
-                    issue_read = json.loads(self.read_from_file(os.path.join(ISSUE_BOARD_DIR, f"{issue}.json")))
+                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
+                    issue_file = os.path.join(issue_dir, 'issue.json')
+                    issue_read = json.loads(self.read_from_file(issue_file))
                     issue_content = json.loads(issue_read.get("content","{}"))
-                    if content_obj and "updated_at" in content_obj:
+                    if content_obj and "updated_at" not in content_obj:
                         content["updated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if content_obj and "author" in content_obj:
+                    if content_obj and "author" not in content_obj:
                         content_obj["author"] = self.name
                     if issue_content and "updates" in issue_content:
                         issue_content["updates"].append(content_obj)
                     else:
                         issue_content["updates"] = [content_obj]
-                    result = self.write_to_file(os.path.join(ISSUE_BOARD_DIR, f"{issue}.json"), json.dumps(issue_content))
+                    result = self.write_to_file(issue_file, json.dumps(issue_content))
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
                     result = f"Error Updating issue {issue} - Error: {e}"
@@ -316,13 +314,13 @@ class OpenAI_Agent:
         try:
             with open(filename, "r") as f:
                 content = f.read()
-            logger.info(f"<{self.name}> - read {filename}")
+            logger.info(f"<{self.name}> - read_from_file {filename} successfully.")
             result = {
                 "filename": filename,
                 "content": content,
             }
         except Exception as e:
-            logger.warning(f"<{self.name}> - Failed to read file {filename}, received Error {e}.")
+            logger.warning(f"<{self.name}> -read_from_file Failed to read file {filename}, received Error {e}.")
             content = f"{e}"
             result = {
                 "filename": filename,
@@ -354,9 +352,10 @@ class OpenAI_Agent:
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            logger.info(f"<{self.name}> -wrote {filename}")
+            logger.info(f"<{self.name}> - write_to_file {filename} successfully.")
             return f"File {filename} has been written successfully."
         except Exception as e:
+            logger.error(f"<{self.name}> - write_to_file Failed to write to file {filename}, received Error {e}.")
             return f"Error: {str(e)} ____ {e}"
 
     def list_dir(self, path: str = None, return_yaml: bool = True) -> str|object:
@@ -374,7 +373,7 @@ class OpenAI_Agent:
         Example::
             >>> agent = OpenAI_Agent("tester")
             >>> print(agent.list_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"issue_board"), True).split()[0])
-            0.json:
+            '0':
 
         """
         contents = {}
@@ -396,10 +395,10 @@ class OpenAI_Agent:
                         }
                     }
         except FileNotFoundError as e:
-            logger.warning(f"<{self.name}> TASK:STEP - tool func list_dir run into error {e}")
+            logger.warning(f"<{self.name}> - list_dir run into FileNotFoundError {e}")
             return f"{e}"
         except PermissionError as e:
-            logger.warning(f"<{self.name}> TASK:STEP - tool func list_dir run into error {e}")
+            logger.warning(f"<{self.name}> - list_dir run into PermissionError {e}")
             return f"{e}"
         
         if return_yaml:
@@ -421,6 +420,7 @@ class OpenAI_Agent:
             None
 
         """
+        current_message = None
         retry_count = int(os.environ.get("RETRY_COUNT", 3))
         logger.info(f"<{self.name}> TASK:BEGIN from:{from_} - task:{task} - retries left:{retry_count}")
         if not task:
@@ -433,7 +433,7 @@ class OpenAI_Agent:
                     logger.debug(f"<{self.name}> TASK:PREP - {self.thread.id} - {run_.id} - {run_.status}")
                     time.sleep(1)
 
-            message = self.llm_client.beta.threads.messages.create(
+            current_message = self.llm_client.beta.threads.messages.create(
                 thread_id=self.thread.id,
                 role="user",
                 content=task
@@ -447,7 +447,7 @@ class OpenAI_Agent:
             logger.warning(f"<{self.name}> TASK:STEP - tool func perform_task run into error {e}")
             return f"{e}"
         msg_logger.info(f"{from_} >> {self.name} - {task}")
-        result = {}
+        result = []
         while self.run.status in ["queued", "in_progress", "requires_action"]:
             logger.debug(f"<{self.name}>-{self.run.status=}")
             if self.run.status == "requires_action":
@@ -537,19 +537,23 @@ class OpenAI_Agent:
         logger.debug(f"<{self.name}> : - terminal run status is:{self.run.status=}, token_count: {self.run.usage}")
         if self.run.status == 'completed':
             messages = self.llm_client.beta.threads.messages.list(
-                thread_id=self.run.thread_id
+                thread_id=self.run.thread_id,
+                order='desc'
             )
-            for msg in sorted(messages.data, key=lambda x: x.role, reverse=True):
-                role = msg.role
+            for msg in messages.data:
+                role = self.name if msg.role == 'assistant' else (from_ if msg.role == 'user' else msg.role)
                 content = msg.content[0].text.value
-                logger.debug(f"<{self.name}> : -run.status is completed - msg is -{role.capitalize()}: {content}")
-                result[role.capitalize()]=content
+                logger.debug(f"<{self.name}> : -run.status is completed - examine messages: {msg.id} -{role.capitalize()}: {content}")
+                result.insert(0,{"role":role, "content":content})
+                if msg.id == current_message.id:
+                    #messages is last entry first, if we hit current_message which is the prompt, don't need to go further back.
+                    break
         else: 
             logger.warning(f"OpenAI run returned status {self.run.status} which is unexpected at this stage. next round will recreate a run.")
 
-        logger.info(f"<{self.name}> TASK:END from:{from_} -result:{json.dumps(result, indent=4)}")
+        logger.info(f"<{self.name}> TASK:END - reply to:{from_} -result:{[r.get('role','unknown').upper()+': '+r.get('content','').strip() for r in result]}")
 
-        return result and result.get("Assistant")
+        return json.dumps(result, indent=4) 
 
     def get_human_input(self, prompt: str = None) -> str:
         """Help AI get user input
@@ -600,11 +604,10 @@ class OpenAI_Agent:
 
         Example::
             >>> agent = OpenAI_Agent("tester")
-            >>> result = agent.execute_module('math', 'sqrt', args=[16])
-            >>> result['output']
-            4.0
+            >>> agent.execute_module('math', 'sqrt', args=[16]).strip()
+            '{"output": 4.0}'
             >>> result = agent.execute_module('os', 'getcwd')
-            >>> result['output'] ==  os.getcwd()
+            >>> os.getcwd() in result
             True
 
         """
