@@ -18,7 +18,7 @@ Usage:
     python -m default_project.team
     all arguments are ignored, this will continue the previously setup project
 """
-
+import json
 import logging
 import os
 import contextlib
@@ -63,7 +63,7 @@ agents = []
 def load_agents():
     global agents
     from . import agent
-    if __package__.startswith("sweteam"):
+    if __package__.endswith("bootstrap"):
         print(f"Warning, Current package name: {__package__}")
     agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
     logger.debug(f"package name: {__package__}")
@@ -81,6 +81,16 @@ def load_agents():
             prompt = "Check the issue_board directory for issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
             round_name = "Initializing"
             while pm and prompt:
-                pm.perform_task(prompt, round_name)
+                pm_reply = pm.perform_task(prompt, round_name)
+                print("***************")
+                for entry in json.loads(pm_reply):
+                    print(entry.get("role").upper(), ":")
+                    print("  ", entry.get("content"))
+
+                while not (eval_score := input("From -10 to 10, how satisfied are you with the previous conversation?")).isdigit():
+                    pass
+                eval_feedback = input("How can the PM improve in the future?")
+                pm.evaluate_agent("pm", eval_score, eval_feedback)
+                print("**********************")
                 prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
                 round_name = "Continuing"

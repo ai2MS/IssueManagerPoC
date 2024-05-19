@@ -31,6 +31,18 @@
             "request": "launch",
             "module": "sweteam.bootstrap",
             "subProcess": false
+        },
+        {
+            "name": "Python Debugger: default_project Module",
+            "envFile":"${workspaceFolder}/.env",
+            "env": {
+                "PYDEVD_DISABLE_FILE_VALIDATION": "1"
+            },
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/default_project",
+            "module": "embedded_dev_team",
+            "subProcess": false
         }
     ]
 }

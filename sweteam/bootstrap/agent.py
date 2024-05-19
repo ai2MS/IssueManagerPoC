@@ -64,6 +64,7 @@ class OpenAI_Agent:
     llm_service = ollama
     model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME","gpt-4-turbo-2024-04-09")
     name = ""
+    procs = []
     def __init__(self, agent_name: str, agent_dir: str = None):
         """
         Initialize the OpenAI_Agent object.
@@ -95,13 +96,13 @@ class OpenAI_Agent:
             self.instruction = agent_config.get('instruction', "")
             self.tools = standard_tools.copy()
             self.tools.extend(agent_config.get('tools'))
-            other_agent_list = [agt.name for agt in agents if agt.name != self.name]
-            chat_function_tools = [tool for tool in self.tools if tool['type'] == 'function' and tool['function']['name'] == 'chat_with_other_agents']
+            chat_function_tools = [tool for tool in self.tools if tool['type'] == 'function' and tool['function']['name'] == 'chat_with_other_agent']
             try:
-                chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum'] = other_agent_list
+                chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum'].remove(self.name)
             except KeyError as e:
                 logger.warning(f"<{self.name}> - chat_with_other_agent tools function does not have agent_name parameter. Please check: {e}")
-            except Exception:
+            except Exception as e:
+                logger.warning(f"<{self.name}> - error setting other_agent_list in chat_with_other_agent tools function. Please check: {e}")
                 pass
             if (useAzureOpenAI):
                 self.model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME",None)
@@ -239,19 +240,18 @@ class OpenAI_Agent:
                     issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
                     if not os.path.exists(issue_dir):
                         os.makedirs(issue_dir, exist_ok=True)
-                    existing_sub_issues = [entry.name for entry in os.scandir(issue_dir) 
+                    existing_sub_issues = [int(entry.name) for entry in os.scandir(issue_dir) 
                                         if entry.is_dir() 
                                         and entry.name.isdigit() 
-                                        and os.path.exists(os.path.join(issue_dir, 'issue.json'))] 
-                    new_issue_number = os.path.join(issue,
-                                        f"{max([int(issue_str) for issue_str in existing_sub_issues], default=0) + 1}")
+                                        and os.path.exists(os.path.join(issue_dir, entry.name,'issue.json'))] 
+                    new_issue_number = f"{max([issue_no for issue_no in existing_sub_issues], default=0) + 1}"
                     if 'created_at' not in content_obj:
                         content_obj['created_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
                     issue_file = os.path.join(issue_dir, new_issue_number,'issue.json')
                     result = self.write_to_file(issue_file, json.dumps(content_obj))
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: s{e.__traceback__.tb_lineno}")
-                    result = f"Error creating issue {new_issue_number}. Error: {e}"
+                    return f"Error creating issue {new_issue_number}. Error: {e}"
                 return "issue" + result.removesuffix('.json*').removeprefix(f"File {ISSUE_BOARD_DIR}") + " created"
             case "read":
                 try:
@@ -273,7 +273,7 @@ class OpenAI_Agent:
                     issue_read = json.loads(self.read_from_file(issue_file))
                     issue_content = json.loads(issue_read.get("content","{}"))
                     if content_obj and "updated_at" not in content_obj:
-                        content["updated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+                        content_obj["updated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
                     if content_obj and "author" not in content_obj:
                         content_obj["author"] = self.name
                     if issue_content and "updates" in issue_content:
@@ -283,8 +283,8 @@ class OpenAI_Agent:
                     result = self.write_to_file(issue_file, json.dumps(issue_content))
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
-                    result = f"Error Updating issue {issue} - Error: {e}"
-                return "issue" + result.removesuffix('.json*').removeprefix("File ") + " created"
+                    return f"Error Updating issue {issue} - Error: {e}"
+                return f"issue {issue} updated"
             case _:
                 return (f"Invalid action: {action}")
             
@@ -372,9 +372,8 @@ class OpenAI_Agent:
         
         Example::
             >>> agent = OpenAI_Agent("tester")
-            >>> print(agent.list_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"issue_board"), True).split()[0])
-            '0':
-
+            >>> agent.list_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"issue_board"), True).split('\\n')[:4]
+            ["'0':", '  issue.json:', '    attributes:', '      mode: 0o100644']
         """
         contents = {}
         if not path:
@@ -404,7 +403,7 @@ class OpenAI_Agent:
         if return_yaml:
             return yaml.dump(contents, default_flow_style=False)
         else:
-            contents
+            return contents
 
     def perform_task(self, task: str = None, from_: str = "Unknown") -> dict:
         """
@@ -451,74 +450,94 @@ class OpenAI_Agent:
         while self.run.status in ["queued", "in_progress", "requires_action"]:
             logger.debug(f"<{self.name}>-{self.run.status=}")
             if self.run.status == "requires_action":
-                required_actions = self.run.required_action.submit_tool_outputs.model_dump()
-                logger.debug(f"<{self.name}> TASK:STEPs -tool_calls: {required_actions}")
-                tools_output = []
-                for action in required_actions["tool_calls"]:
-                    func_name = action["function"]["name"]
-                    arguments = json.loads(action["function"]["arguments"])
-                    func_names = [item['function']['name'] for item in self.tools if item['type'] == 'function']
-                    msg_logger.info(f"{self.name} -> {func_name} {arguments}")
-                    logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
-                    if func_name in func_names:
-                        func = getattr(self, func_name, None)
-                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
-                        output = func(**arguments)
-                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} {func_name} returned {output}")
-                        if output is not None:  # Check if output is not None
+                try:
+                    required_actions = self.run.required_action.submit_tool_outputs.model_dump()
+                    logger.debug(f"<{self.name}> TASK:STEPs -tool_calls: {required_actions}")
+                    tools_output = []
+                    for action in required_actions["tool_calls"]:
+                        func_name = action["function"]["name"]
+                        arguments = json.loads(action["function"]["arguments"])
+                        func_names = [item['function']['name'] for item in self.tools if item['type'] == 'function']
+                        msg_logger.info(f"{self.name} -> {func_name} {arguments}")
+                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
+                        if func_name in func_names:
+                            func = getattr(self, func_name, None)
+                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
+                            output = func(**arguments)
+                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} {func_name} returned {output}")
+                            if output is not None:  # Check if output is not None
+                                tools_output.append({
+                                    "tool_call_id": action["id"],
+                                    "output": output
+                                })
+                            else:
+                                logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
+                        elif func_name == "multi_tool_use.parallel":
+                            for tool_use in arguments.get("tool_uses", []):
+                                tool_use_func_name = tool_use.get("receipient_name","").removeprefix("functions")
+                                tool_use_func_args = tool_use.get("parameters", {})
+                                if tool_use_func_name in func_names:
+                                    func = getattr(self, tool_use_func_name, None)
+                                    logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -calling tool {tool_use_func_name} with arguments {tool_use_func_args}")
+                                    output = func(**tool_use_func_args)
+                                    logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -{tool_use_func_name} returned {output}")
+                                    if output is not None:  # Check if output is not None
+                                        tools_output.append({
+                                            "tool_call_id": action["id"],
+                                            "output": output
+                                        })
+                                    else:
+                                        logger.warning(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -Function {func_name} returned None")
+                                pass
+                        else:
+                            logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
                             tools_output.append({
                                 "tool_call_id": action["id"],
-                                "output": output
+                                "output": f"Function {func_name} not a configured tool."
                             })
+                        
+                    if tools_output:
+                        tools_output_head = ''
+                        tools_output_1st = tools_output[0]
+                        if 'output' in tools_output_1st:
+                            tools_output_head = tools_output_1st['output']
                         else:
-                            logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
-                    else:
-                        logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
-                        tools_output.append({
-                            "tool_call_id": action["id"],
-                            "output": f"Function {func_name} not a configured tool."
-                        })
-                    
-                if tools_output:
-                    tools_output_head = ''
-                    tools_output_1st = tools_output[0]
-                    if 'output' in tools_output_1st:
-                        tools_output_head = tools_output_1st['output']
-                    else:
-                        tools_output_head = tools_output_1st
-                    logger.info(f"<{self.name}> TASK:STEPs -Function(s) returned {str(tools_output_head):.32s}...")
-                    submit_retry_left = 2
-                    while submit_retry_left:=submit_retry_left-1 > 0:
-                        try:
-                            self.run = self.llm_client.beta.threads.runs.submit_tool_outputs_and_poll(
-                            thread_id=self.thread.id,
-                            run_id=self.run.id,
-                            tool_outputs=tools_output
-                            )
-                        except Exception as e:
-                            if submit_retry_left > 0:
-                                try:
-                                    self.run = self.llm_client.beta.threads.runs.retrieve(
-                                        thread_id=self.run.thread_id,
-                                        run_id=self.run.id,
-                                    )                   
-                                    logger.warn(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}, recreating the run to retry.")
-                                    if self.run.status in ["expired", "failed"]:
-                                        self.run = self.llm_client.beta.threads.runs.create(
-                                            thread_id=self.thread.id,
-                                            assistant_id=self.assistant.id,
-                                            timeout=300
-                                        )
-                                        logger.debug(f"<{self.name}> TASK:STEPs -Recreated run: {self.run.id}, new status: {self.run.status}")
-                                except Exception as err:
-                                    logger.error(f"<{self.name}> TASK:STEPs -Failed to recreate run: {err} -after- submitting tool_output receiving {e}.")
+                            tools_output_head = tools_output_1st
+                        logger.info(f"<{self.name}> TASK:STEPs -Function(s) returned {str(tools_output_head):.32s}...")
+                        submit_retry_left = 2
+                        while submit_retry_left:=submit_retry_left-1 > 0:
+                            try:
+                                self.run = self.llm_client.beta.threads.runs.submit_tool_outputs_and_poll(
+                                thread_id=self.thread.id,
+                                run_id=self.run.id,
+                                tool_outputs=tools_output
+                                )
+                            except Exception as e:
+                                if submit_retry_left > 0:
+                                    try:
+                                        self.run = self.llm_client.beta.threads.runs.retrieve(
+                                            thread_id=self.run.thread_id,
+                                            run_id=self.run.id,
+                                        )                   
+                                        logger.warn(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}, recreating the run to retry.")
+                                        if self.run.status in ["expired", "failed"]:
+                                            self.run = self.llm_client.beta.threads.runs.create(
+                                                thread_id=self.thread.id,
+                                                assistant_id=self.assistant.id,
+                                                timeout=300
+                                            )
+                                            logger.debug(f"<{self.name}> TASK:STEPs -Recreated run: {self.run.id}, new status: {self.run.status}")
+                                    except Exception as err:
+                                        logger.error(f"<{self.name}> TASK:STEPs -Failed to recreate run: {err} -after- submitting tool_output receiving {e}.")
+                                else:
+                                    logger.error(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}")
+                                msg_logger.error(f"{func_name} -> {self.name} - {tools_output} !!!received!!! {e}")
                             else:
-                                logger.error(f"<{self.name}> TASK:STEPs -Failed to submit tool outputs:{e}")
-                            msg_logger.error(f"{func_name} -> {self.name} - {tools_output} !!!received!!! {e}")
-                        else:
-                            logger.info(f"<{self.name}> TASK:STEPs -Tool outputs submitted successfully.")
-                            msg_logger.info(f"{func_name} -> {self.name} - {tools_output}")
-                            submit_retry_left = 0
+                                logger.info(f"<{self.name}> TASK:STEPs -Tool outputs submitted successfully.")
+                                msg_logger.info(f"{func_name} -> {self.name} - {tools_output}")
+                                submit_retry_left = 0
+                except Exception as e:
+                    logger.error(f"<{self.name}> TASK:STEP - require action Error: {e} at {e.__traceback__.tb_lineno}")
 
             time.sleep(0.5)
             self.run = self.llm_client.beta.threads.runs.retrieve(
@@ -555,6 +574,27 @@ class OpenAI_Agent:
 
         return json.dumps(result, indent=4) 
 
+    def evaluate_agent(self, agent_name: str, score: int = 0, feedback: str = ''):
+        """Provide evaluation of the response by an agent
+        Args:
+            agent_name: the name of the agent to evaluate
+            score: positive if agent response meet expectation, netagive if did not
+            feedback: how can the agent improve in the future
+        Returns:
+            None
+        """
+        logger.debug(f"<{self.name}> - evaluate_agent({agent_name},{score},{feedback})")
+        the_other_agent = [a for a in agents if a.name==agent_name][0]
+        if the_other_agent:
+            the_other_agent.assistant.metadata["performance"] += score
+            agent_dir = os.path.join(os.path.dirname(__file__), "agents")
+            with open(os.path.join(agent_dir,agent_name+".feedback.json"), "a") as ff:
+                json.dump({"timestamp":datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"),"score":score, "feedback":feedback}, ff)
+            return None
+        else:
+            logger.warn(f"<{self.name}> - evaluate_agent, unknown agent {agent_name}, can't evaluate, skipping...")
+            raise Exception(f"Agent {agent_name} not found")
+
     def get_human_input(self, prompt: str = None) -> str:
         """Help AI get user input
         
@@ -586,7 +626,7 @@ class OpenAI_Agent:
         if the_other_agent:
             chat_result = the_other_agent.perform_task(message, self.name)
 
-            return f"{chat_result}"
+            return f"{chat_result}. Please use evaluate_agent tool to evaluate my response."
         else:
             raise Exception(f"Agent {agent_name} not found")
 
@@ -618,14 +658,16 @@ class OpenAI_Agent:
                              f"output['output'] = getattr({module_name}, '{method_name}')(*{args}, **{kwargs}); " \
                              "print(json.dumps(output))"
             python_mode = "-c"
+            python_command_args = []
         else:
-            python_command =  f"{module_name} *{args} " 
+            python_command =  f"{module_name}"
+            python_command_args = args
             python_mode = "-m"
 
         logger.debug(f"<{self.name}> execute_module - Executing {python_command}")
         # Execute the command as a subprocess
         try:
-            result = subprocess.run(['python', python_mode, python_command],
+            result = subprocess.run(['python', python_mode, python_command, *python_command_args],
                                     capture_output=True, text=True, check=False, shell=False, timeout=120)
             if result.returncode == 0:
                 logger.debug(f"<{self.name}> execute_module -Execution returned 0 exit code")
@@ -634,8 +676,8 @@ class OpenAI_Agent:
                 else:
                     return result.stdout.strip()
             else:
-                logger.error(f"<{self.name}> execute_module -Execution returned non-0 exit code. Error: {result.stderr}")
-                return f'Execution finished with error: {result.stderr}'
+                logger.error(f"<{self.name}> execute_module -Execution returned non-0 exit code. Output: {result.stdout}; Error: {result.stderr}")
+                return f'Execution finished with error: {result.stderr}, Output: {result.stdout}'
         except subprocess.CalledProcessError as e:
             logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
             return f'Execution failed with error: {e}'
@@ -646,7 +688,7 @@ class OpenAI_Agent:
             logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
             return f'Execution failed with error: {e}'
 
-    def execute_command(self, command_name: str, args: list = []) -> dict[str]:
+    def execute_command(self, command_name: str, args: list = [], asynchronous: bool = False) -> dict[str]:
         """Execute a specified method from a Python module.
 
         Args:
@@ -669,14 +711,24 @@ class OpenAI_Agent:
 
         # Execute the command as a subprocess
         try:
-            result = subprocess.run([command_name, *args],
-                                    capture_output=True, text=True, check=False, shell=False, timeout=120)
-            logger.debug("<{self.name}> - execute_command -returned {result}.")
-            if result.returncode == 0:
-                return result.stdout
+            if asynchronous:
+                process = subprocess.Popen([command_name, *args],
+                                           stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE,
+                                           text=True,
+                                           shell=False,
+                                           timeout=1200)
+                self.procs.append(process)
+                logger.debug(f"<{self.name}> - execute_command - started parallel process: {process.pid}")
             else:
-                logger.error(f"<{self.name}> execute_command -Execution returned non-0 exit code. Error: {result.stderr}")
-                return f"Error: {result.stderr}"
+                result = subprocess.run([command_name, *args],
+                                        capture_output=True, text=True, check=False, shell=False, timeout=120)
+                logger.debug("<{self.name}> - execute_command -returned {result}.")
+                if result.returncode == 0:
+                    return result.stdout
+                else:
+                    logger.error(f"<{self.name}> execute_command -Execution returned non-0 exit code. Error: {result.stderr}")
+                    return f"Error: {result.stderr}"
         except subprocess.CalledProcessError as e:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
             return f"error: {e.stderr}"
@@ -686,6 +738,7 @@ class OpenAI_Agent:
         except Exception as e:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
             return f'Execution failed with error: {e}'
+
 
     def write_all_files_to_temp_dir(self, thread: str, output_path: str = '/tmp'):
         """save OpenAI tools_resources files locally"""

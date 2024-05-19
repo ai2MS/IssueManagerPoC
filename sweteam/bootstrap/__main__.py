@@ -59,11 +59,12 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             if start_over:
                 logger.warn(f"'-n' flag is set, Deleting existing project <{project_name}>")
                 shutil.rmtree(project_dir, ignore_errors=True)
-            os.makedirs(project_dir, exist_ok=False)
-            os.makedirs(project_team_dir, exist_ok=False)
-            logger.info(f"New project <{project_name} is created.>")
+            poetry_new_result = subprocess.run(['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
+            poetry_new_result.check_returncode()
+            logger.info(f"New project <{project_name} is created.")
             copy_directory(current_dir, project_team_dir)
             copy_directory(os.path.join(current_parent_dir,"issue_board"), os.path.join(project_dir, "issue_board"))
+            os.chdir(project_dir)
             logger.info(f"and project <{project_name} is initialized with bootstrap code.>")
         except FileExistsError:
             logger.warn(f"Dir <{project_dir}> already exist. Continue project <{project_name}>")
@@ -72,11 +73,14 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             exit(101)
         
         try:
-            import importlib
-            sys.path.insert(0, project_dir)
             os.chdir(project_dir)
-            actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
-            actual_project_team.load_agents()
+            # import importlib
+            # sys.path.insert(0, project_dir)
+            # actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
+            # actual_project_team.load_agents()
+            poetry_result = subprocess.run(['poetry', 'install'], capture_output=True, text=True)
+            poetry_result.check_returncode()
+            poetry_result = subprocess.run(['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME], check=True)
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:
             logger.error(f"{project_name} agents run into errors {e}. stack: {str(e)}")
@@ -87,7 +91,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
                     subprocess.run(['git', 'checkout', old_branch_name], capture_output=True, text=True)
                     subprocess.run(['git', 'branch', '-D', new_branch_name], capture_output=True, text=True)
 
-    else:
+    elif __package__:
         # if invoke the project.team instead of the bootstrap
         current_file = os.path.realpath(__file__)
         current_dir = os.path.dirname(current_file)
@@ -114,6 +118,9 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
         from . import load_agents
         logger.debug(f"Invoked as {__package__}, not bootstrap, loading agents")
         load_agents()
+    else:
+        logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.dirname(__file__)}")
+        exit(1)
 
 
 def copy_directory(src_dir, dst_dir):
@@ -141,16 +148,19 @@ def copy_directory(src_dir, dst_dir):
 
 
 if __name__ == "__main__":
-    if __package__ and __package__.endswith(".bootstrap"):        
-        incoming_project_name = os.environ.get("PROJECT_NAME", "default_project")
-        incoming_start_over = False
+    if not __package__ :
+        logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.dirname(__file__)}")
+        exit(1)
+    if __package__.endswith(".bootstrap"):        
+        project_name = os.environ.get("PROJECT_NAME", "default_project")
+        start_over = False
         for arg in sys.argv:
             if arg == "-p":
-                incoming_project_name = sys.argv[sys.argv.index(arg) + 1]
+                project_name = sys.argv[sys.argv.index(arg) + 1]
             elif arg == "-n":
-                incomeing_start_over = True
+                start_over = True
     else:
-        incoming_project_name = __package__.split(".")[-1]
-        incoming_start_over = False
+        project_name = __package__.split(".")[0]
+        start_over = False
 
-    main(incoming_project_name, incoming_start_over)
+    main(project_name, start_over)
