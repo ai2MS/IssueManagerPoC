@@ -13,8 +13,7 @@ import os
 import sys
 import shutil
 import subprocess
-from . import logger
-from .utils import current_directory
+from . import logger, utils
 
 def main(project_name: str = 'default_project', start_over: bool = False) -> None:
     """
@@ -38,7 +37,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             current_file = os.path.realpath(__file__)
             current_dir = os.path.dirname(current_file)
             current_parent_dir = os.path.dirname(current_dir)
-            project_dir = os.path.join(current_directory(), project_name)
+            project_dir = os.path.join(os.getcwd(), project_name)
             parent_dir = os.path.dirname(project_dir)
             project_team_dir = os.path.join(project_dir, EMBEDDED_DEV_TEAM_NAME)
             try:
@@ -59,18 +58,28 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             if start_over:
                 logger.warn(f"'-n' flag is set, Deleting existing project <{project_name}>")
                 shutil.rmtree(project_dir, ignore_errors=True)
-            poetry_new_result = subprocess.run(['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
-            poetry_new_result.check_returncode()
-            logger.info(f"New project <{project_name} is created.")
-            copy_directory(current_dir, project_team_dir)
-            copy_directory(os.path.join(current_parent_dir,"issue_board"), os.path.join(project_dir, "issue_board"))
-            os.chdir(project_dir)
-            logger.info(f"and project <{project_name} is initialized with bootstrap code.>")
-        except FileExistsError:
-            logger.warn(f"Dir <{project_dir}> already exist. Continue project <{project_name}>")
+            if os.path.exists(project_dir):
+                os.chdir(project_dir)
+                if os.path.exists(os.path.join(project_dir, "pyproject.toml")):
+                    poetry_version_result = subprocess.run(['poetry', 'version'], capture_output=True, text=True)
+                    poetry_version_result.check_returncode()
+                    if poetry_version_result.stdout.split()[0] == project_name:
+                        logger.info(f"Project <{project_name}> is already initialized.")
+                else:
+                    poetry_init_result = subprocess.run(['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
+                    poetry_init_result.check_returncode()
+                    logger.info(f"New project <{project_name}> is initialized.")
+            else:
+                poetry_new_result = subprocess.run(['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
+                poetry_new_result.check_returncode()
+                logger.info(f"New project <{project_name}> is created.")
+                copy_directory(current_dir, project_team_dir)
+                copy_directory(os.path.join(current_parent_dir,"issue_board"), os.path.join(project_dir, "issue_board"))
+                os.chdir(project_dir)
+                logger.info(f"and project <{project_name}> is initialized with bootstrap code.")
         except Exception as e:
             logger.fatal(f"Error {e} setting up project: " + project_dir)
-            exit(101)
+            sys.exit(101)
         
         try:
             os.chdir(project_dir)
@@ -80,7 +89,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             # actual_project_team.load_agents()
             poetry_result = subprocess.run(['poetry', 'install'], capture_output=True, text=True)
             poetry_result.check_returncode()
-            poetry_result = subprocess.run(['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME], check=True)
+            poetry_result = subprocess.run(['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name], check=True)
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
         except Exception as e:
             logger.error(f"{project_name} agents run into errors {e}. stack: {str(e)}")
@@ -148,19 +157,20 @@ def copy_directory(src_dir, dst_dir):
 
 
 if __name__ == "__main__":
-    if not __package__ :
-        logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.dirname(__file__)}")
-        exit(1)
-    if __package__.endswith(".bootstrap"):        
-        project_name = os.environ.get("PROJECT_NAME", "default_project")
-        start_over = False
-        for arg in sys.argv:
-            if arg == "-p":
-                project_name = sys.argv[sys.argv.index(arg) + 1]
-            elif arg == "-n":
-                start_over = True
-    else:
-        project_name = __package__.split(".")[0]
-        start_over = False
+    match __package__:
+        case s if s.endswith("bootstrap"):
+            utils.project_name = os.environ.get("PROJECT_NAME", "default_project")
+            start_over = False
+            for arg in sys.argv:
+                if arg == "-p":
+                    utils.project_name = sys.argv[sys.argv.index(arg) + 1]
+                elif arg == "-n":
+                    start_over = True
+        case ''|None:
+            logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.basename(os.path.dirname(__file__))}")
+            exit(1)
+        case _:
+            utils.project_name = os.path.basename(os.getcwd())
+            start_over = False
 
-    main(project_name, start_over)
+    main(utils.project_name, start_over)

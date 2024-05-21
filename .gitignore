@@ -2,6 +2,7 @@
 /.venv
 /bootstrap.log
 default_project/
+saved_project_*
 /*.log
 /test.deleteme
 **/__pycache__

@@ -1,6 +1,7 @@
 
 import os
 import json
+import sys
 import time
 from datetime import datetime
 import subprocess
@@ -9,24 +10,26 @@ from openai import OpenAI, AzureOpenAI
 import yaml
 
 if __package__:
-    from .utils import current_directory, standard_tools
+    from .utils import standard_tools, project_name
     from . import logger, agents, msg_logger
 else:
     print("Not running as a package, importing from current directory.")
-    from utils import current_directory, standard_tools
+    from utils import  standard_tools, project_name
     from __init__ import logger, agents, msg_logger
 
-class Ollama_Agent:
-    llm_service = ollama
-    model = "gpt-4-turbo-2024-04-09"
-    name = ""
-    def __init__(self) -> None:          
-        modelfile = (f"FROM llama3\n"
-            f"SYSTEM {self.instruction}\n")
-        response = self.llm_service.create(model=self.model, modelfile=modelfile, stream=False)
-        logger.info(f"creating ollama model {self.model}: {response}")
-        # todo: need a compatibility layer to make this ollama model work similar to openai's assistant API
-        # currently ollama model won't work
+
+
+# class Ollama_Agent:
+#     llm_service = ollama
+#     model = "gpt-4-turbo-2024-04-09"
+#     name = ""
+#     def __init__(self) -> None:          
+#         modelfile = (f"FROM llama3\n"
+#             f"SYSTEM {self.instruction}\n")
+#         response = self.llm_service.create(model=self.model, modelfile=modelfile, stream=False)
+#         logger.info(f"creating ollama model {self.model}: {response}")
+#         # todo: need a compatibility layer to make this ollama model work similar to openai's assistant API
+#         # currently ollama model won't work
 
 class OpenAI_Agent:
     """
@@ -64,7 +67,10 @@ class OpenAI_Agent:
     llm_service = ollama
     model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME","gpt-4-turbo-2024-04-09")
     name = ""
+    tool_choice = "auto"
+    temperature = 1
     procs = []
+    performance = 0
     def __init__(self, agent_name: str, agent_dir: str = None):
         """
         Initialize the OpenAI_Agent object.
@@ -84,7 +90,7 @@ class OpenAI_Agent:
             >>> agent = OpenAI_Agent("tester")
 
         """
-        useAzureOpenAI = os.environ.get("USE_AZURE") == "True"
+        useAzureOpenAI = os.environ.get('USE_AZURE') == "True"
         logger.info(f"Initializing agent {agent_name}")
         self.file_name = __file__
         self.name = agent_name
@@ -94,21 +100,24 @@ class OpenAI_Agent:
             config_json = os.path.join(agent_dir, f"{agent_name}.json")
             agent_config = json.load(open(config_json))
             self.instruction = agent_config.get('instruction', "")
+            self.instruction = self.instruction.replace("{project_name}", project_name)
+            self.performance = agent_config.get('performance', 0)
+            self.tool_choice = agent_config.get('tool_choice', "auto")
+            self.temperature = agent_config.get('temperature', 1)
             self.tools = standard_tools.copy()
             self.tools.extend(agent_config.get('tools'))
-            chat_function_tools = [tool for tool in self.tools if tool['type'] == 'function' and tool['function']['name'] == 'chat_with_other_agent']
+            chat_function_tools = [tool for tool in self.tools if tool['type'] == "function" and tool['function']['name'] == "chat_with_other_agent"]
             try:
                 chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum'].remove(self.name)
             except KeyError as e:
                 logger.warning(f"<{self.name}> - chat_with_other_agent tools function does not have agent_name parameter. Please check: {e}")
             except Exception as e:
                 logger.warning(f"<{self.name}> - error setting other_agent_list in chat_with_other_agent tools function. Please check: {e}")
-                pass
             if (useAzureOpenAI):
-                self.model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME",None)
+                self.model = os.environ.get('AZURE_OPENAI_DEPLOYMENT_NAME',None)
                 #Azure does not support #self.tools.append({"type":"retrieval"})
             else:
-                self.model = os.environ.get("OPENAI_MODEL",None)
+                self.model = os.environ.get('OPENAI_MODEL',None)
                 self.tools.append({"type":"file_search"})
         except json.decoder.JSONDecodeError:
             logger.fatal(f"{agent_name}m.json file is not valid JSON. Please fix the pm.json file.")
@@ -127,17 +136,17 @@ class OpenAI_Agent:
         Returns:
             None
         """
-        useAzureOpenAI = os.environ.get("USE_AZURE") == "True"
+        useAzureOpenAI = os.environ.get('USE_AZURE') == "True"
         try:
             if (useAzureOpenAI):
-                azure_openai_api_key=os.environ.get("AZURE_OPENAI_API_KEY", None)
+                azure_openai_api_key=os.environ.get('AZURE_OPENAI_API_KEY', None)
                 if azure_openai_api_key is None:
                     logger.fatal(f"Please provide AZURE_OPENAI_API_KEY as environment variable.  Cannot continue without AZURE_OPENAI_API_KEY.")
                     exit()
                 logger.info("Using Azure OpenAI API")
-                self.llm_client = AzureOpenAI(api_key=os.environ.get("AZURE_OPENAI_API_KEY"))
+                self.llm_client = AzureOpenAI(api_key=os.environ.get('AZURE_OPENAI_API_KEY'))
             else:
-                openai_api_key=os.environ.get("OPENAI_API_KEY", None)
+                openai_api_key=os.environ.get('OPENAI_API_KEY', None)
                 if openai_api_key is None:
                     logger.fatal(f"Please provide OPENAI_API_KEY as environment variable.  Cannot continue without OPENAI_API_KEY.")
                     exit()
@@ -162,6 +171,7 @@ class OpenAI_Agent:
                     instructions=self.instruction,
                     model=self.model, 
                     tools=self.tools,
+                    temperature=self.temperature
                 )
                 logger.debug(f"Created new assistant {self.name}")
 
@@ -194,47 +204,61 @@ class OpenAI_Agent:
         return f"<Agent: {self.name}>" #json.dumps(self.my_own_code())
 
     # method to list/read/write issues
-    def issue_manager(self, action: str, issue: str = '', only_in_state: list = [], content: str = None):
+    def issue_manager(self, action: str, issue: str = '', only_in_state: list = [], content: str = None, assignee: str = None):
         ISSUE_BOARD_DIR = "issue_board"
         content_obj = {}
         if content:
             try:
-                content_obj = json.loads(content)
+                content_obj = json.loads(content.replace("\n", "\\n")) #correct one of the most common json string error - have newline instead of \\n in it.
             except Exception as e:
-                return ("Error parsing {content}, please make sure content is a proper json object.")
+                logger.warning(f"<{self.name}> - issue_manager {action} cannot parse content {content}.")
+                return (f"Error parsing {content}, please make sure content is a proper json object.")
         match action:
-            case "list":
+            case 'list':
                 issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
                 results = []
                 for root, dirs, files in os.walk(issue_dir):
                     for file in files:
-                        if file=='issue.json':
+                        if file=="issue.json":
                             file_path = os.path.join(root, file)
                             issue_number = root.removeprefix(ISSUE_BOARD_DIR+'/')
                             try:
                                 with open(file_path, 'r') as f:
                                     data = json.load(f)
                                 updates = data.get('updates', [])
-                                updates.sort(key=lambda x: x.get('update at',0), reverse=True)
+                                updates.sort(key=lambda x: x.get('updated_at',0), reverse=True)
                                 if updates:
-                                    status = updates[0].get('status', 'new')
-                                    priority = updates[0].get('priority', '0')
+                                    status = updates[0].get('status', "new")
+                                    priority = updates[0].get('priority', "1 - Low")
+                                    updated_by = updates[0].get('updated_by', "unknown")
+                                    assigned_to = updates[0].get('assignee',updated_by)
                                 else:
-                                    status = data.get('status', 'new')
-                                    priority = data.get('priority', '0')
+                                    status = data.get('status', "new")
+                                    priority = data.get('priority', "1 - Low")
+                                    updated_by = data.get('updated_by', "unknown")
+                                    assigned_to = data.get('assignee', updated_by)
+                                if only_in_state and "in progress" in only_in_state:
+                                    # sometimes AI will use "in process" instead of "in progress", we will try to accommodate that.s
+                                    only_in_state.append("in process")
                                 if only_in_state and status not in only_in_state:
                                     continue
-                                results.append({'issue':issue_number, 'priority':priority, 'status':status})
+                                if assignee and assignee != assigned_to:
+                                    continue
+                                if priority.lower().strip() in ["low", "medium", "high", "urgent"]:
+                                    pri_rank = {"low": 4, "medium": 3, "high": 2, "critical":1, "urgent": 0}
+                                    priority = f"{pri_rank[priority.lower()]} - {priority.capitalize()}"
+                                results.append({'issue':issue_number, 'priority':priority, 'status':status, 'assigned_to': assigned_to, 'title': data.get('title', "no title")})
                             except json.JSONDecodeError:
                                 logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
-                                results.append({"issue":issue_number, "status":f"Error Decoding Json"})
+                                results.append({'issue':issue_number, 'status':f"Error Decoding Json"})
                             except FileNotFoundError:
                                 logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error file not found: {file_path}")
                                 results.append({"issue":issue_number, "status":f"Error file not found"})
                             except Exception as e:
                                 logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
                                 results.append({"issue":issue_number, "status":f"Error {e}"})
-                return f"{results}"
+
+                return json.dumps(results)
             case "create":
                 try:
                     issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
@@ -243,48 +267,97 @@ class OpenAI_Agent:
                     existing_sub_issues = [int(entry.name) for entry in os.scandir(issue_dir) 
                                         if entry.is_dir() 
                                         and entry.name.isdigit() 
-                                        and os.path.exists(os.path.join(issue_dir, entry.name,'issue.json'))] 
+                                        and os.path.exists(os.path.join(issue_dir, entry.name, "issue.json"))] 
                     new_issue_number = f"{max([issue_no for issue_no in existing_sub_issues], default=0) + 1}"
                     if 'created_at' not in content_obj:
                         content_obj['created_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    issue_file = os.path.join(issue_dir, new_issue_number,'issue.json')
-                    result = self.write_to_file(issue_file, json.dumps(content_obj))
+                    if 'updates' not in content_obj or content_obj['updates']:
+                        content_obj['updates'] = [{}]
+                    if 'updated_by' not in content_obj['updates'][-1]:
+                        content_obj['updates'][-1]['updated_by'] = self.name
+                    if 'updated_at' not in content_obj['updates'][-1]:
+                        content_obj['updates'][-1]['updated_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+                    if 'priority' not in content_obj['updates'][-1]:
+                        content_obj['updates'][-1]['priority'] = "1 - Low"
+                    if 'assignee' not in content_obj['updates'][-1]:
+                        content_obj['updates'][-1]['assignee'] = self.name
+                    if 'status' not in content_obj['updates'][-1]:
+                        content_obj['updates'][-1]['status'] = "new"
+                    
+                    new_issue_dir = os.path.join(issue_dir, new_issue_number)
+                    if not os.path.exists(new_issue_dir):
+                        os.makedirs(new_issue_dir, exist_ok=True)
+
+                    new_issue_file = os.path.join(issue_dir, new_issue_number,"issue.json")
+                    with open(new_issue_file, 'w') as ifh:
+                        result = json.dump(content_obj,ifh)
+                        result = f"Issue {issue} created."
                 except Exception as e:
-                    logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: s{e.__traceback__.tb_lineno}")
-                    return f"Error creating issue {new_issue_number}. Error: {e}"
-                return "issue" + result.removesuffix('.json*').removeprefix(f"File {ISSUE_BOARD_DIR}") + " created"
+                    logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: lineno:{e.__traceback__.tb_lineno}")
+                    result = f"Error creating issue {new_issue_number}. Error: {e}"
+                return result
             case "read":
                 try:
                     issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                    issue_file = os.path.join(issue_dir, 'issue.json')
-                    read_result = json.loads(self.read_from_file(issue_file))
-                    if 'content' in read_result:
-                        result = read_result.get("content", "")
-                    else:
-                        result = ""
+                    issue_file = os.path.join(issue_dir, "issue.json")
+                    with open(issue_file, 'r') as jsonfile:
+                        result = json.load(jsonfile)
+                    
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/read issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
                     result = f"Error Reading issue {issue} - Error: {e}"
-                return result
+                return json.dumps(result)
             case "update":
                 try:
                     issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                    issue_file = os.path.join(issue_dir, 'issue.json')
-                    issue_read = json.loads(self.read_from_file(issue_file))
-                    issue_content = json.loads(issue_read.get("content","{}"))
+                    issue_file = os.path.join(issue_dir, "issue.json")
+                    with open(issue_file, 'r') as ifile:
+                        issue_content = json.load(ifile)
                     if content_obj and "updated_at" not in content_obj:
-                        content_obj["updated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if content_obj and "author" not in content_obj:
-                        content_obj["author"] = self.name
+                        content_obj['updated_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+                    if content_obj and "updated_by" not in content_obj:
+                        content_obj['updated_by'] = self.name
+                    if content_obj and "assignee" not in content_obj:
+                        content_obj['assignee'] = self.name
                     if issue_content and "updates" in issue_content:
-                        issue_content["updates"].append(content_obj)
+                        issue_content['updates'].append(content_obj)
                     else:
-                        issue_content["updates"] = [content_obj]
-                    result = self.write_to_file(issue_file, json.dumps(issue_content))
+                        issue_content['updates'] = [content_obj]
+                    with open(issue_file, 'w') as ifile:
+                        result = json.dump(issue_content, ifile)
+                        result = f"Issue {issue} updated successfully."
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
-                    return f"Error Updating issue {issue} - Error: {e}"
-                return f"issue {issue} updated"
+                    result = f"Error Updating issue {issue} - Error: {e}"
+                return result
+            case "assign":
+                try:
+                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
+                    issue_file = os.path.join(issue_dir, "issue.json")
+                    with open(issue_file, 'r') as ifile:
+                        issue_content = json.load(ifile)
+                    if not content:
+                        content_obj = {}
+                    if "updated_at" not in content_obj:
+                        content_obj['updated_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+                    if "updated_by" not in content_obj:
+                        content_obj['updated_by'] = self.name
+                    if "details" not in content_obj:
+                        content_obj['details'] = f"assign {issue} to {assignee} by {self.name}."
+                    if assignee:
+                        content_obj['assignee'] = assignee
+                    if issue_content and "updates" in issue_content:
+                        issue_content['updates'].append(content_obj)
+                    else:
+                        issue_content['updates'] = [content_obj]
+                    with open(issue_file, 'w') as ifile:
+                        result = json.dump(issue_content, ifile)
+                        result = f"Assigned {issue} to {assignee} successfully."
+                except Exception as e:
+                    logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
+                    result = f"Error Updating issue {issue} - Error: {e}"
+                return result
+
             case _:
                 return (f"Invalid action: {action}")
             
@@ -312,19 +385,19 @@ class OpenAI_Agent:
     
         logger.debug(f"<{self.name}> - read_from_file {filename}")
         try:
-            with open(filename, "r") as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 content = f.read()
             logger.info(f"<{self.name}> - read_from_file {filename} successfully.")
             result = {
-                "filename": filename,
-                "content": content,
+                'filename': filename,
+                'content': content,
             }
         except Exception as e:
             logger.warning(f"<{self.name}> -read_from_file Failed to read file {filename}, received Error {e}.")
             content = f"{e}"
             result = {
-                "filename": filename,
-                "error": f"{e}",
+                'filename': filename,
+                'error': f"{e}",
             }
         return json.dumps(result)
         
@@ -349,7 +422,7 @@ class OpenAI_Agent:
             if directory:
                 os.makedirs(directory, exist_ok=True)
 
-            with open(filename, "w", encoding="utf-8") as f:
+            with open(filename, 'w', encoding="utf-8") as f:
                 f.write(content)
 
             logger.info(f"<{self.name}> - write_to_file {filename} successfully.")
@@ -420,7 +493,7 @@ class OpenAI_Agent:
 
         """
         current_message = None
-        retry_count = int(os.environ.get("RETRY_COUNT", 3))
+        retry_count = int(os.environ.get('RETRY_COUNT', 3))
         logger.info(f"<{self.name}> TASK:BEGIN from:{from_} - task:{task} - retries left:{retry_count}")
         if not task:
             task = self.instruction
@@ -431,15 +504,22 @@ class OpenAI_Agent:
                 while run_.status in ['active'] and (wait_other_runs_timeout := wait_other_runs_timeout - 1) > 0:
                     logger.debug(f"<{self.name}> TASK:PREP - {self.thread.id} - {run_.id} - {run_.status}")
                     time.sleep(1)
-
+            performance_hint = ""
+            match self.performance:
+                case n if n < 0:
+                    performance_hint = f"Your current performance score is {self.performance}, this is not satisfactory, please pay more attention to system prompt and task description."
+                case n if n > 1:
+                    performance_hint = f"Your current performance score is {self.performance}, keep your approach, it's working."
             current_message = self.llm_client.beta.threads.messages.create(
                 thread_id=self.thread.id,
-                role="user",
+                role='user',
                 content=task
                 )
             self.run = self.llm_client.beta.threads.runs.create(
                 thread_id=self.thread.id,
                 assistant_id=self.assistant.id,
+                tool_choice=self.tool_choice,
+                additional_instructions=performance_hint,
                 timeout=300
             )
         except Exception as e:
@@ -454,28 +534,32 @@ class OpenAI_Agent:
                     required_actions = self.run.required_action.submit_tool_outputs.model_dump()
                     logger.debug(f"<{self.name}> TASK:STEPs -tool_calls: {required_actions}")
                     tools_output = []
-                    for action in required_actions["tool_calls"]:
-                        func_name = action["function"]["name"]
-                        arguments = json.loads(action["function"]["arguments"])
-                        func_names = [item['function']['name'] for item in self.tools if item['type'] == 'function']
+                    for action in required_actions['tool_calls']:
+                        func_name = action['function']['name']
+                        arguments = json.loads(action['function']['arguments'])
+                        func_names = [item['function']['name'] for item in self.tools if item['type'] == "function."]
                         msg_logger.info(f"{self.name} -> {func_name} {arguments}")
                         logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
                         if func_name in func_names:
-                            func = getattr(self, func_name, None)
-                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
-                            output = func(**arguments)
-                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} {func_name} returned {output}")
+                            # prevent chat back to the person already in a chat:
+                            if func_name == "chat_with_other_agent" and "agent_name" in arguments and arguments['agent_name'] == from_:
+                                output = f"You are already chatting with {from_}, please reply to them instead of starting a new chat."
+                            else:
+                                func = getattr(self, func_name, None)
+                                logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
+                                output = func(**arguments)
+                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -called tool {func_name} returned {output}")
                             if output is not None:  # Check if output is not None
                                 tools_output.append({
-                                    "tool_call_id": action["id"],
-                                    "output": output
+                                    'tool_call_id': action['id'],
+                                    'output': output
                                 })
                             else:
                                 logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
                         elif func_name == "multi_tool_use.parallel":
-                            for tool_use in arguments.get("tool_uses", []):
-                                tool_use_func_name = tool_use.get("receipient_name","").removeprefix("functions")
-                                tool_use_func_args = tool_use.get("parameters", {})
+                            for tool_use in arguments.get('tool_uses', []):
+                                tool_use_func_name = tool_use.get('recipient_name',"").removeprefix("functions")
+                                tool_use_func_args = tool_use.get('parameters', {})
                                 if tool_use_func_name in func_names:
                                     func = getattr(self, tool_use_func_name, None)
                                     logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -calling tool {tool_use_func_name} with arguments {tool_use_func_args}")
@@ -483,8 +567,8 @@ class OpenAI_Agent:
                                     logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -{tool_use_func_name} returned {output}")
                                     if output is not None:  # Check if output is not None
                                         tools_output.append({
-                                            "tool_call_id": action["id"],
-                                            "output": output
+                                            'tool_call_id': action['id'],
+                                            'output': output
                                         })
                                     else:
                                         logger.warning(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -Function {func_name} returned None")
@@ -492,14 +576,14 @@ class OpenAI_Agent:
                         else:
                             logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
                             tools_output.append({
-                                "tool_call_id": action["id"],
-                                "output": f"Function {func_name} not a configured tool."
+                                'tool_call_id': action['id'],
+                                'output': f"Function {func_name} not a configured tool."
                             })
                         
                     if tools_output:
                         tools_output_head = ''
                         tools_output_1st = tools_output[0]
-                        if 'output' in tools_output_1st:
+                        if "output" in tools_output_1st:
                             tools_output_head = tools_output_1st['output']
                         else:
                             tools_output_head = tools_output_1st
@@ -523,6 +607,7 @@ class OpenAI_Agent:
                                         if self.run.status in ["expired", "failed"]:
                                             self.run = self.llm_client.beta.threads.runs.create(
                                                 thread_id=self.thread.id,
+                                                tool_choice=self.tool_choice,
                                                 assistant_id=self.assistant.id,
                                                 timeout=300
                                             )
@@ -538,6 +623,12 @@ class OpenAI_Agent:
                                 submit_retry_left = 0
                 except Exception as e:
                     logger.error(f"<{self.name}> TASK:STEP - require action Error: {e} at {e.__traceback__.tb_lineno}")
+                    if retry_count < 0:
+                        logger.fatal(f"<{self.name}> TASK:STEP - require action exceeded max retry_count. exiting...")
+                        sys.exit(1)
+                    else:
+                        retry_count -= 1
+                        logger.warning(f"<{self.name}> TASK:STEP - retry_count remaining: {retry_count} -retrying...")
 
             time.sleep(0.5)
             self.run = self.llm_client.beta.threads.runs.retrieve(
@@ -545,14 +636,22 @@ class OpenAI_Agent:
                 run_id=self.run.id,
             )
             if self.run.status in ["expiried", "failed"]:
-                logger.warning(f"<{self.name}> TASK: run status is {self.run.status}, this is unexpected. retrying...")
                 retry_count -= 1
                 if retry_count > 0:
+                    logger.warning(f"<{self.name}> TASK: run status is {self.run.status}, retry_count remaining: {retry_count} -retrying...")
+                    if 'last_error' in self.run and 'code' in self.run.last_error and self.run.last_error.code == 'rate_limit_exceeded':
+                        logger.warning(f"<{self.name}> TASK: run received 'rate_limit_exceeded', waiting for 15 sec before retrying...")
+                        time.sleep(15)
                     self.run = self.llm_client.beta.threads.runs.create(
                         thread_id=self.thread.id,
+                        tool_choice=self.tool_choice,
                         assistant_id=self.assistant.id,
                         timeout=300
                     )
+                else:
+                    logger.error(f"<{self.name}> TASK: run status is {self.run.status}, this is unexpected. max_retry count reached. exiting...")
+                    return "Task was not completed, it reported status {self.run.status}."
+
         logger.debug(f"<{self.name}> : - terminal run status is:{self.run.status=}, token_count: {self.run.usage}")
         if self.run.status == 'completed':
             messages = self.llm_client.beta.threads.messages.list(
@@ -563,18 +662,19 @@ class OpenAI_Agent:
                 role = self.name if msg.role == 'assistant' else (from_ if msg.role == 'user' else msg.role)
                 content = msg.content[0].text.value
                 logger.debug(f"<{self.name}> : -run.status is completed - examine messages: {msg.id} -{role.capitalize()}: {content}")
-                result.insert(0,{"role":role, "content":content})
+                result.insert(0,{'role':role, 'content':content})
                 if msg.id == current_message.id:
                     #messages is last entry first, if we hit current_message which is the prompt, don't need to go further back.
                     break
         else: 
-            logger.warning(f"OpenAI run returned status {self.run.status} which is unexpected at this stage. next round will recreate a run.")
+            logger.warning(f"OpenAI run returned status {self.run.status} which is unexpected at this stage.")
+            result.append({"content":"Task was not completed, the assistant reported run status {self.run.status}."})
 
-        logger.info(f"<{self.name}> TASK:END - reply to:{from_} -result:{[r.get('role','unknown').upper()+': '+r.get('content','').strip() for r in result]}")
+        logger.info(f"<{self.name}> TASK:END - reply to {from_}: {[r.get('role',"unknown").upper()+': '+r.get('content',"").strip() for r in result if r.get('role',"unknow") != from_]}")
 
         return json.dumps(result, indent=4) 
 
-    def evaluate_agent(self, agent_name: str, score: int = 0, feedback: str = ''):
+    def evaluate_agent(self, agent_name: str, score: int = 0, feedback: str = "") -> str:
         """Provide evaluation of the response by an agent
         Args:
             agent_name: the name of the agent to evaluate
@@ -584,16 +684,24 @@ class OpenAI_Agent:
             None
         """
         logger.debug(f"<{self.name}> - evaluate_agent({agent_name},{score},{feedback})")
-        the_other_agent = [a for a in agents if a.name==agent_name][0]
+        other_agents = [a for a in agents if a.name==agent_name]
+        if other_agents:
+            the_other_agent = other_agents[0]
+        else:
+            logger.warning(f"<{self.name}> - evaluate_agent does not recognize {agent_name} as a valid agent.")
+            return f"<{self.name}> - evaluate_agent does not recognize {agent_name} as a valid agent."
         if the_other_agent:
-            the_other_agent.assistant.metadata["performance"] += score
+            the_other_agent.performance += score
             agent_dir = os.path.join(os.path.dirname(__file__), "agents")
-            with open(os.path.join(agent_dir,agent_name+".feedback.json"), "a") as ff:
-                json.dump({"timestamp":datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"),"score":score, "feedback":feedback}, ff)
-            return None
+            new_eval = {"timestamp":datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f"),"evaluated by":self.name,"score":score, "feedback":feedback}
+            new_eval_yaml = yaml.dump([new_eval], default_flow_style=False, sort_keys=False)
+            with open(os.path.join(agent_dir,agent_name+".feedback.yaml"), 'a+') as yamlfile:
+                yamlfile.write("\n"+new_eval_yaml)
+            logger.debug(f"<{self.name}> - evaluate_agent, agent {agent_name} new performance score is {the_other_agent.performance}.")
+            return "Thanks for your feedback"
         else:
             logger.warn(f"<{self.name}> - evaluate_agent, unknown agent {agent_name}, can't evaluate, skipping...")
-            raise Exception(f"Agent {agent_name} not found")
+            return f"Agent {agent_name} was not found, can't evaluate."
 
     def get_human_input(self, prompt: str = None) -> str:
         """Help AI get user input
@@ -677,7 +785,7 @@ class OpenAI_Agent:
                     return result.stdout.strip()
             else:
                 logger.error(f"<{self.name}> execute_module -Execution returned non-0 exit code. Output: {result.stdout}; Error: {result.stderr}")
-                return f'Execution finished with error: {result.stderr}, Output: {result.stdout}'
+                return f'Execution finished with non-0 return code: {result.stderr}, Output: {result.stdout}'
         except subprocess.CalledProcessError as e:
             logger.error(f"<{self.name}> execute_module -Execution failed. Error: {e}")
             return f'Execution failed with error: {e}'
@@ -723,15 +831,16 @@ class OpenAI_Agent:
             else:
                 result = subprocess.run([command_name, *args],
                                         capture_output=True, text=True, check=False, shell=False, timeout=120)
-                logger.debug("<{self.name}> - execute_command -returned {result}.")
+                logger.debug(f"<{self.name}> - execute_command -returned {result.stdout}.")
+                output = {'output': result.stdout, 'error': result.stderr}
                 if result.returncode == 0:
-                    return result.stdout
+                    return f"{output}"
                 else:
                     logger.error(f"<{self.name}> execute_command -Execution returned non-0 exit code. Error: {result.stderr}")
-                    return f"Error: {result.stderr}"
+                    return f"execute_command returned non-0 return code. Error:{output}"
         except subprocess.CalledProcessError as e:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: {e}")
-            return f"error: {e.stderr}"
+            return f"error: {e}"
         except subprocess.TimeoutExpired:
             logger.error(f"<{self.name}> execute_command -Execution failed. Error: timeout")
             return f'Execution timed out, if this happens often, please check if this module execution is hang.'
@@ -740,7 +849,7 @@ class OpenAI_Agent:
             return f'Execution failed with error: {e}'
 
 
-    def write_all_files_to_temp_dir(self, thread: str, output_path: str = '/tmp'):
+    def write_all_files_to_temp_dir(self, thread: str, output_path: str = "tmp"):
         """save OpenAI tools_resources files locally"""
         file_ids = [
             file_id
@@ -750,7 +859,7 @@ class OpenAI_Agent:
         for file_id in file_ids:
             file_data = self.llm_client.files.content(file_id)
             file_data_bytes = file_data.read()
-            with open(output_path+"/"+file_id, "wb") as file:
+            with open(output_path+"/"+file_id, 'wb') as file:
                 file.write(file_data_bytes)
 
 if __name__ == "__main__":

@@ -43,14 +43,14 @@ console_handler.setFormatter(c_format)
 logger.addHandler(console_handler)
 
 
-my_name = __package__.split(".")[0]
+my_name = os.path.basename(os.getcwd())
 file_handler = logging.FileHandler(f"{my_name}.log")
 f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 file_handler.setFormatter(f_format)
 logger.addHandler(file_handler)
 
 msg_logger = logging.getLogger("message_log")
-if __package__ and not __package__.startswith("sweteam"):
+if __package__ and not __package__.endswith("bootstrap"):
     msg_file_handler = logging.FileHandler(f"{my_name}_messages.log")
     msg_file_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     msg_file_handler.setFormatter(msg_file_format)
@@ -58,6 +58,7 @@ if __package__ and not __package__.startswith("sweteam"):
     msg_logger.setLevel(logging.INFO)
 
 agents = []
+
 
 # load agents
 def load_agents():
@@ -80,17 +81,38 @@ def load_agents():
             
             prompt = "Check the issue_board directory for issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
             round_name = "Initializing"
+            replies = []
             while pm and prompt:
                 pm_reply = pm.perform_task(prompt, round_name)
-                print("***************")
-                for entry in json.loads(pm_reply):
-                    print(entry.get("role").upper(), ":")
-                    print("  ", entry.get("content"))
+                replies.append(json.loads(pm_reply))
+                try:
+                    open_issues = json.loads(pm.issue_manager("list", only_in_state=["new","in progress", "open"]))
+                    logger.debug(f"<{round_name}> - the pm finished one round, the current list of open issues are {open_issues}")
+                except Exception as e:
+                    logger.error(f"<{round_name}> - Error loading open issues: {e}")
+                    open_issues = []
+                for agt in agents:
+                    agt_issues = [i for i in open_issues if i.get("assignee") == agt.name]
+                    agt_issues.sort(key=lambda x: x.get("priority"), reverse=True)
+                    if agt_issues:
+                        agt_issue = agt_issues[0]
+                        agt_reply = agt.perform_task(f"\nIssue {agt_issue.get('issue')} is still in {agt_issue.get('status')} status, it is about {agt_issue.get('title')}. Can you please try to complete it asap?", round_name)
+                        replies.append(json.loads(agt_reply))
 
-                while not (eval_score := input("From -10 to 10, how satisfied are you with the previous conversation?")).isdigit():
-                    pass
-                eval_feedback = input("How can the PM improve in the future?")
-                pm.evaluate_agent("pm", eval_score, eval_feedback)
+                print("***************")
+                for reply in replies:
+                    print(f"===")
+                    for entry in reply:
+                        print(entry.get("role").upper(), ":")
+                        print("  ", entry.get("content"))
+                while agt_to_eval := input("<<Eval>> Which agent would you like to evaluate (blank to skip eval)? "):
+                    eval_score = input(f"<<Eval>> How satisfied are you with the {agt_to_eval}? ")
+                    try:
+                        eval_score = int(eval_score)
+                    except:
+                        eval_score = 0
+                    eval_feedback = input(f"<<Eval>> How can the {agt_to_eval} improve in the future? ")
+                    pm.evaluate_agent(agt_to_eval, eval_score, eval_feedback)
                 print("**********************")
                 prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
                 round_name = "Continuing"
