@@ -5,19 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File with Arguments",
+            "name": "Python: Current File",
             "type": "debugpy",
             "request": "launch",
-            "envFile": ".env",
+            "envFile":"${workspaceFolder}/.env",
             "env": {
                 "PYDEVD_DISABLE_FILE_VALIDATION": "1"
             },
             "program": "${file}",
+            "args": [
+                "-v"
+            ],
             "console": "integratedTerminal",
             "pythonArgs": [
                 "-Xfrozen_modules=off"
             ],
-            "args": ["${command:pickArgs}"],
             "justMyCode": true,
             "subProcess": false
         },
@@ -30,6 +32,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "sweteam.bootstrap",
+            "args": ["${command:pickArgs}"],
             "subProcess": false
         },
         {

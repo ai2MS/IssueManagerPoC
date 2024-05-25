@@ -15,13 +15,13 @@ import shutil
 import subprocess
 from . import logger, utils
 
-def main(project_name: str = 'default_project', start_over: bool = False) -> None:
+def main(project_name: str = 'default_project', overwrite: bool = False) -> None:
     """
     Creates a new project directory and initializes it with bootstrap code.
 
     Args:
         project_name (str, optional): The name of the project. Defaults to 'default_project'.
-        start_over (bool, optional): Whether to delete the existing project directory and start over. Defaults to False.
+        overwrite (bool, optional): Whether to delete the existing project directory and start over. Defaults to False.
 
     Returns:
         None
@@ -55,7 +55,7 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             except Exception as e:
                 logger.fatal(f"Error setting up branch for {project_name}. Can't continue.")
                 exit(1)
-            if start_over:
+            if overwrite:
                 logger.warn(f"'-n' flag is set, Deleting existing project <{project_name}>")
                 shutil.rmtree(project_dir, ignore_errors=True)
             if os.path.exists(project_dir):
@@ -63,8 +63,11 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
                 if os.path.exists(os.path.join(project_dir, "pyproject.toml")):
                     poetry_version_result = subprocess.run(['poetry', 'version'], capture_output=True, text=True)
                     poetry_version_result.check_returncode()
-                    if poetry_version_result.stdout.split()[0] == project_name:
+                    if poetry_version_result.stdout.split()[0] == project_name.replace("_", "-"):
                         logger.info(f"Project <{project_name}> is already initialized.")
+                    else:
+                        logger.error(f"Directory {project_dir} already contain a project that is called {poetry_version_result.stdout.split()[0]}, can't initialize it as {project_name}")
+                        sys.exit(1)
                 else:
                     poetry_init_result = subprocess.run(['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
                     poetry_init_result.check_returncode()
@@ -73,9 +76,18 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
                 poetry_new_result = subprocess.run(['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
                 poetry_new_result.check_returncode()
                 logger.info(f"New project <{project_name}> is created.")
-                copy_directory(current_dir, project_team_dir)
                 copy_directory(os.path.join(current_parent_dir,"issue_board"), os.path.join(project_dir, "issue_board"))
                 os.chdir(project_dir)
+                overwrite = True
+
+            if overwrite:
+                copy_directory(current_dir, project_team_dir)
+                init_package_result = utils.initialize_package(os.path.join(project_dir, os.path.basename(project_dir)))
+                logger.debug(f"Initializing package returned {init_package_result}")
+                init_Dockerfile_result = utils.initialize_Dockerfile(project_name)
+                logger.debug(f"Initializing docker returned {init_Dockerfile_result}")
+                init_script_result = utils.initialize_startup_script()
+                logger.debug(f"Initializing startup script returned {init_script_result}")
                 logger.info(f"and project <{project_name}> is initialized with bootstrap code.")
         except Exception as e:
             logger.fatal(f"Error {e} setting up project: " + project_dir)
@@ -89,8 +101,8 @@ def main(project_name: str = 'default_project', start_over: bool = False) -> Non
             # actual_project_team.load_agents()
             poetry_result = subprocess.run(['poetry', 'install'], capture_output=True, text=True)
             poetry_result.check_returncode()
-            poetry_result = subprocess.run(['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name], check=True)
             logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
+            poetry_result = subprocess.run(['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name], check=True)
         except Exception as e:
             logger.error(f"{project_name} agents run into errors {e}. stack: {str(e)}")
             if new_branch_name:
@@ -159,18 +171,25 @@ def copy_directory(src_dir, dst_dir):
 if __name__ == "__main__":
     match __package__:
         case s if s.endswith("bootstrap"):
-            utils.project_name = os.environ.get("PROJECT_NAME", "default_project")
-            start_over = False
-            for arg in sys.argv:
-                if arg == "-p":
-                    utils.project_name = sys.argv[sys.argv.index(arg) + 1]
-                elif arg == "-n":
-                    start_over = True
+            try:
+                utils.project_name = os.environ.get("PROJECT_NAME", "default_project")
+                overwrite = False
+                for arg in sys.argv:
+                    if arg == "-p":
+                        utils.project_name = sys.argv[sys.argv.index(arg) + 1]
+                    elif arg == "-o":
+                        overwrite = sys.argv[sys.argv.index(arg) + 1] == "True"
+            except IndexError:
+                logger.fatal(f"Error parsing arguments.\nUsage:\npython -m {os.path.basename(os.path.dirname(__file__))} [-p project_name] [-o True|False]\n")
+                sys.exit(1)
+            except Exception as e:
+                logger.fatal(f"Error parsing arguments: {e}")
+                sys.exit(1)
         case ''|None:
             logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.basename(os.path.dirname(__file__))}")
             exit(1)
         case _:
             utils.project_name = os.path.basename(os.getcwd())
-            start_over = False
+            overwrite = False
 
-    main(utils.project_name, start_over)
+    main(utils.project_name, overwrite)

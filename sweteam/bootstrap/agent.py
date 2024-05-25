@@ -71,7 +71,9 @@ class OpenAI_Agent:
     temperature = 1
     procs = []
     performance = 0
-    def __init__(self, agent_name: str, agent_dir: str = None):
+    instruction = ""
+    additional_instructions = ""
+    def __init__(self, agent_name: str, agent_dir: str = None, agent_config: dict = None) -> None:
         """
         Initialize the OpenAI_Agent object.
 
@@ -98,7 +100,8 @@ class OpenAI_Agent:
             agent_dir = os.path.join(os.path.dirname(__file__), "agents")
         try:
             config_json = os.path.join(agent_dir, f"{agent_name}.json")
-            agent_config = json.load(open(config_json))
+            if agent_config is None:
+                agent_config = json.load(open(config_json))
             self.instruction = agent_config.get('instruction', "")
             self.instruction = self.instruction.replace("{project_name}", project_name)
             self.performance = agent_config.get('performance', 0)
@@ -207,12 +210,16 @@ class OpenAI_Agent:
     def issue_manager(self, action: str, issue: str = '', only_in_state: list = [], content: str = None, assignee: str = None):
         ISSUE_BOARD_DIR = "issue_board"
         content_obj = {}
-        if content:
+        logger.debug(f"<{self.name}> - entering - issue_manager({action}, {issue}, {only_in_state}, {content})")
+        if isinstance(content, str):
             try:
                 content_obj = json.loads(content.replace("\n", "\\n")) #correct one of the most common json string error - have newline instead of \\n in it.
             except Exception as e:
                 logger.warning(f"<{self.name}> - issue_manager {action} cannot parse content {content}.")
                 return (f"Error parsing {content}, please make sure content is a proper json object.")
+        else:
+            content_obj = content
+        logger.debug(f"<{self.name}> - issue_manager, {type(content_obj)}, {isinstance(content_obj, dict)}, {content_obj}")
         match action:
             case 'list':
                 issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
@@ -226,12 +233,16 @@ class OpenAI_Agent:
                                 with open(file_path, 'r') as f:
                                     data = json.load(f)
                                 updates = data.get('updates', [])
-                                updates.sort(key=lambda x: x.get('updated_at',0), reverse=True)
+                                updates.sort(key=lambda x: x.get('updated_at',0))
                                 if updates:
-                                    status = updates[0].get('status', "new")
-                                    priority = updates[0].get('priority', "1 - Low")
-                                    updated_by = updates[0].get('updated_by', "unknown")
-                                    assigned_to = updates[0].get('assignee',updated_by)
+                                    latest_status = [u for u in updates if u.get('status', "")] 
+                                    status = latest_status[-1].get('status', "unknown") if latest_status else "new"
+                                    latest_priority = [u for u in updates if u.get('priority', "")] 
+                                    priority = latest_priority[-1].get('priority', "5 - unknown") if latest_status else "1 - Low"
+                                    latest_updated_by = [u for u in updates if u.get('updated_by', "")] 
+                                    updated_by = latest_updated_by[-1].get('updated_by', "unknown") if latest_updated_by else "unknown"
+                                    latest_assignee = [u for u in updates if u.get('assignee', "")] 
+                                    assigned_to = latest_assignee[-1].get('assignee', updated_by) if latest_assignee else updated_by
                                 else:
                                     status = data.get('status', "new")
                                     priority = data.get('priority', "1 - Low")
@@ -247,7 +258,7 @@ class OpenAI_Agent:
                                 if priority.lower().strip() in ["low", "medium", "high", "urgent"]:
                                     pri_rank = {"low": 4, "medium": 3, "high": 2, "critical":1, "urgent": 0}
                                     priority = f"{pri_rank[priority.lower()]} - {priority.capitalize()}"
-                                results.append({'issue':issue_number, 'priority':priority, 'status':status, 'assigned_to': assigned_to, 'title': data.get('title', "no title")})
+                                results.append({'issue':issue_number, 'priority':priority, 'status':status, 'assignee': assigned_to, 'title': data.get('title', "no title")})
                             except json.JSONDecodeError:
                                 logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
                                 results.append({'issue':issue_number, 'status':f"Error Decoding Json"})
@@ -258,6 +269,7 @@ class OpenAI_Agent:
                                 logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
                                 results.append({"issue":issue_number, "status":f"Error {e}"})
 
+                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {results}")
                 return json.dumps(results)
             case "create":
                 try:
@@ -271,7 +283,7 @@ class OpenAI_Agent:
                     new_issue_number = f"{max([issue_no for issue_no in existing_sub_issues], default=0) + 1}"
                     if 'created_at' not in content_obj:
                         content_obj['created_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if 'updates' not in content_obj or content_obj['updates']:
+                    if 'updates' not in content_obj or not content_obj['updates']:
                         content_obj['updates'] = [{}]
                     if 'updated_by' not in content_obj['updates'][-1]:
                         content_obj['updates'][-1]['updated_by'] = self.name
@@ -295,6 +307,8 @@ class OpenAI_Agent:
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: lineno:{e.__traceback__.tb_lineno}")
                     result = f"Error creating issue {new_issue_number}. Error: {e}"
+
+                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {result}")
                 return result
             case "read":
                 try:
@@ -306,6 +320,7 @@ class OpenAI_Agent:
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/read issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
                     result = f"Error Reading issue {issue} - Error: {e}"
+                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {result}")
                 return json.dumps(result)
             case "update":
                 try:
@@ -329,6 +344,7 @@ class OpenAI_Agent:
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
                     result = f"Error Updating issue {issue} - Error: {e}"
+                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {result}")
                 return result
             case "assign":
                 try:
@@ -356,9 +372,12 @@ class OpenAI_Agent:
                 except Exception as e:
                     logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
                     result = f"Error Updating issue {issue} - Error: {e}"
+
+                logger.debug(f"<{self.name}> - exiting - issue_manager({action}, {issue}...) returned {result}")
                 return result
 
             case _:
+                logger.warn(f"<{self.name}> - exiting - issue_manager({action}, ...) {action} is not a valid action.")
                 return (f"Invalid action: {action}")
             
     # the following are function tools for OpenAI assistants.
@@ -431,7 +450,7 @@ class OpenAI_Agent:
             logger.error(f"<{self.name}> - write_to_file Failed to write to file {filename}, received Error {e}.")
             return f"Error: {str(e)} ____ {e}"
 
-    def list_dir(self, path: str = None, return_yaml: bool = True) -> str|object:
+    def list_dir(self, path: str = '', return_yaml: bool = True) -> str|object:
         """
         Recursively lists directory contents and organizes them in a nested dictionary
         format suitable for YAML output, including file size and timestamp.
@@ -448,24 +467,25 @@ class OpenAI_Agent:
             >>> agent.list_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"issue_board"), True).split('\\n')[:4]
             ["'0':", '  issue.json:', '    attributes:', '      mode: 0o100644']
         """
-        contents = {}
-        if not path:
-            path = os.getcwd()
+        contents = []
+        if not path or path.startswith("/"):
+            path = os.path.join(os.getcwd(), path)
+        
         try:
             for entry in os.scandir(path):
                 if entry.is_dir(follow_symlinks=False):
                     # Recursively list subdirectories
-                    contents[entry.name] = self.list_dir(entry.path, False)
+                    contents.append({entry.name : self.list_dir(entry.path, False)})
                 else:
                     # Get file details
                     stat = entry.stat()
-                    contents[entry.name] = {
+                    contents.append({entry.name: {
                         'size': stat.st_size,
                         'timestamp': datetime.fromtimestamp(stat.st_mtime).isoformat(),
                         'attributes': {
                             'mode': oct(stat.st_mode),
                         }
-                    }
+                    }})
         except FileNotFoundError as e:
             logger.warning(f"<{self.name}> - list_dir run into FileNotFoundError {e}")
             return f"{e}"
@@ -504,12 +524,6 @@ class OpenAI_Agent:
                 while run_.status in ['active'] and (wait_other_runs_timeout := wait_other_runs_timeout - 1) > 0:
                     logger.debug(f"<{self.name}> TASK:PREP - {self.thread.id} - {run_.id} - {run_.status}")
                     time.sleep(1)
-            performance_hint = ""
-            match self.performance:
-                case n if n < 0:
-                    performance_hint = f"Your current performance score is {self.performance}, this is not satisfactory, please pay more attention to system prompt and task description."
-                case n if n > 1:
-                    performance_hint = f"Your current performance score is {self.performance}, keep your approach, it's working."
             current_message = self.llm_client.beta.threads.messages.create(
                 thread_id=self.thread.id,
                 role='user',
@@ -519,7 +533,7 @@ class OpenAI_Agent:
                 thread_id=self.thread.id,
                 assistant_id=self.assistant.id,
                 tool_choice=self.tool_choice,
-                additional_instructions=performance_hint,
+                additional_instructions=self.additional_instructions,
                 timeout=300
             )
         except Exception as e:
@@ -536,48 +550,56 @@ class OpenAI_Agent:
                     tools_output = []
                     for action in required_actions['tool_calls']:
                         func_name = action['function']['name']
-                        arguments = json.loads(action['function']['arguments'])
-                        func_names = [item['function']['name'] for item in self.tools if item['type'] == "function."]
-                        msg_logger.info(f"{self.name} -> {func_name} {arguments}")
-                        logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
-                        if func_name in func_names:
-                            # prevent chat back to the person already in a chat:
-                            if func_name == "chat_with_other_agent" and "agent_name" in arguments and arguments['agent_name'] == from_:
-                                output = f"You are already chatting with {from_}, please reply to them instead of starting a new chat."
-                            else:
-                                func = getattr(self, func_name, None)
-                                logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
-                                output = func(**arguments)
-                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -called tool {func_name} returned {output}")
-                            if output is not None:  # Check if output is not None
+                        try:
+                            arguments = json.loads(action['function']['arguments'])
+                            func_names = [item['function']['name'] for item in self.tools if item['type'] == "function"]
+                            msg_logger.info(f"{self.name} -> {func_name} {arguments}")
+                            logger.debug(f"<{self.name}> TASK:STEP-{action['id']} - {func_name} {arguments}")
+                            if func_name in func_names:
+                                # prevent chat back to the person already in a chat:
+                                if func_name == "chat_with_other_agent" and "agent_name" in arguments and arguments['agent_name'] == from_:
+                                    output = f"You are already chatting with {from_}, please reply to them instead of starting a new chat."
+                                else:
+                                    func = getattr(self, func_name, None)
+                                    logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -calling tool {func_name} with arguments {arguments}")
+                                    output = func(**arguments)
+                                logger.debug(f"<{self.name}> TASK:STEP-{action['id']} -called tool {func_name} returned {output}")
+                                if output is not None:  # Check if output is not None
+                                    tools_output.append({
+                                        'tool_call_id': action['id'],
+                                        'output': output
+                                    })
+                                else:
+                                    logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
+                            elif func_name == "multi_tool_use.parallel":
+                                multi_tool_use_output = ''
+                                for tool_use in arguments.get('tool_uses', []):
+                                    tool_use_func_name = tool_use.get('recipient_name',"").removeprefix("functions.")
+                                    tool_use_func_args = tool_use.get('parameters', {})
+                                    if tool_use_func_name in func_names:
+                                        func = getattr(self, tool_use_func_name, None)
+                                        logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -calling tool {tool_use_func_name} with arguments {tool_use_func_args}")
+                                        output = func(**tool_use_func_args)
+                                        logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -{tool_use_func_name} returned {output}")
+                                        if output is not None:  # Check if output is not None
+                                            multi_tool_use_output += f"Output of {tool_use.get('recipient_name',"")}:\n{output}\n\n"
+                                        else:
+                                            logger.warning(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -Function {func_name} returned None")
+
                                 tools_output.append({
                                     'tool_call_id': action['id'],
-                                    'output': output
+                                    'output': multi_tool_use_output
                                 })
                             else:
-                                logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} returned None")
-                        elif func_name == "multi_tool_use.parallel":
-                            for tool_use in arguments.get('tool_uses', []):
-                                tool_use_func_name = tool_use.get('recipient_name',"").removeprefix("functions")
-                                tool_use_func_args = tool_use.get('parameters', {})
-                                if tool_use_func_name in func_names:
-                                    func = getattr(self, tool_use_func_name, None)
-                                    logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -calling tool {tool_use_func_name} with arguments {tool_use_func_args}")
-                                    output = func(**tool_use_func_args)
-                                    logger.debug(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -{tool_use_func_name} returned {output}")
-                                    if output is not None:  # Check if output is not None
-                                        tools_output.append({
-                                            'tool_call_id': action['id'],
-                                            'output': output
-                                        })
-                                    else:
-                                        logger.warning(f"<{self.name}> TASK:STEP- sub-step of multi_tool_use.parallel -Function {func_name} returned None")
-                                pass
-                        else:
-                            logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
+                                logger.warning(f"<{self.name}> TASK:STEP-{action['id']} -Function {func_name} not a configured tool.")
+                                tools_output.append({
+                                    'tool_call_id': action['id'],
+                                    'output': f"Function {func_name} not a configured tool."
+                                })
+                        except Exception as e:
                             tools_output.append({
                                 'tool_call_id': action['id'],
-                                'output': f"Function {func_name} not a configured tool."
+                                'output': f"Error: calling tool {func_name}, received error {e}"
                             })
                         
                     if tools_output:
@@ -638,10 +660,12 @@ class OpenAI_Agent:
             if self.run.status in ["expiried", "failed"]:
                 retry_count -= 1
                 if retry_count > 0:
-                    logger.warning(f"<{self.name}> TASK: run status is {self.run.status}, retry_count remaining: {retry_count} -retrying...")
-                    if 'last_error' in self.run and 'code' in self.run.last_error and self.run.last_error.code == 'rate_limit_exceeded':
-                        logger.warning(f"<{self.name}> TASK: run received 'rate_limit_exceeded', waiting for 15 sec before retrying...")
-                        time.sleep(15)
+                    logger.warning(f"<{self.name}> TASK: thread.run status is {self.run.status}, retry_count remaining: {retry_count} -retrying...")
+                    if 'last_error' in self.run and 'code' in self.run.last_error:
+                        logger.warning(f"<{self.name}> TASK: thread.run returned error {self.run.last_error}")
+                        if self.run.last_error.code == 'rate_limit_exceeded':
+                            logger.warning(f"<{self.name}> TASK: thread.run received 'rate_limit_exceeded', waiting for 15 sec before retrying...")
+                            time.sleep(15)
                     self.run = self.llm_client.beta.threads.runs.create(
                         thread_id=self.thread.id,
                         tool_choice=self.tool_choice,
@@ -649,10 +673,10 @@ class OpenAI_Agent:
                         timeout=300
                     )
                 else:
-                    logger.error(f"<{self.name}> TASK: run status is {self.run.status}, this is unexpected. max_retry count reached. exiting...")
+                    logger.error(f"<{self.name}> TASK: thread.run status is {self.run.status}, this is unexpected. max_retry count reached. exiting...")
                     return "Task was not completed, it reported status {self.run.status}."
 
-        logger.debug(f"<{self.name}> : - terminal run status is:{self.run.status=}, token_count: {self.run.usage}")
+        logger.debug(f"<{self.name}> : - TASKs all processed - run {self.run.id} status is:{self.run.status}, token_count: {self.run.usage}")
         if self.run.status == 'completed':
             messages = self.llm_client.beta.threads.messages.list(
                 thread_id=self.run.thread_id,
@@ -661,7 +685,7 @@ class OpenAI_Agent:
             for msg in messages.data:
                 role = self.name if msg.role == 'assistant' else (from_ if msg.role == 'user' else msg.role)
                 content = msg.content[0].text.value
-                logger.debug(f"<{self.name}> : -run.status is completed - examine messages: {msg.id} -{role.capitalize()}: {content}")
+                logger.debug(f"<{self.name}> : -run {self.run.id} - examine messages: {msg.id} -{role.capitalize()}: {content}")
                 result.insert(0,{'role':role, 'content':content})
                 if msg.id == current_message.id:
                     #messages is last entry first, if we hit current_message which is the prompt, don't need to go further back.

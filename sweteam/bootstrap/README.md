@@ -36,5 +36,3 @@ sweteam:
 In the future, one can invoke python -m project_team to continue the project without the bootstrap.
 
 The bootstrap include agent.py and utils.py files, and an agents directory.  
-
-

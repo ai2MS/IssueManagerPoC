@@ -63,7 +63,8 @@ agents = []
 # load agents
 def load_agents():
     global agents
-    from . import agent
+    from . import agent, execassistant
+    ea = None
     if __package__.endswith("bootstrap"):
         print(f"Warning, Current package name: {__package__}")
     agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
@@ -74,45 +75,18 @@ def load_agents():
             # for agt in agents_list:
             #     agents.append(agent.OpenAI_Agent(agt.removesuffix(".json"), agents_dir))
             agents.extend([stack.enter_context(agent.OpenAI_Agent(agt, agents_dir)) for agt in agents_list])
-
-            pm = [a for a in agents if a.name=="pm"][0]
-            if not pm:
-                pm = agents[0]
             
-            prompt = "Check the issue_board directory for issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
-            round_name = "Initializing"
-            replies = []
-            while pm and prompt:
-                pm_reply = pm.perform_task(prompt, round_name)
-                replies.append(json.loads(pm_reply))
-                try:
-                    open_issues = json.loads(pm.issue_manager("list", only_in_state=["new","in progress", "open"]))
-                    logger.debug(f"<{round_name}> - the pm finished one round, the current list of open issues are {open_issues}")
-                except Exception as e:
-                    logger.error(f"<{round_name}> - Error loading open issues: {e}")
-                    open_issues = []
-                for agt in agents:
-                    agt_issues = [i for i in open_issues if i.get("assignee") == agt.name]
-                    agt_issues.sort(key=lambda x: x.get("priority"), reverse=True)
-                    if agt_issues:
-                        agt_issue = agt_issues[0]
-                        agt_reply = agt.perform_task(f"\nIssue {agt_issue.get('issue')} is still in {agt_issue.get('status')} status, it is about {agt_issue.get('title')}. Can you please try to complete it asap?", round_name)
-                        replies.append(json.loads(agt_reply))
 
-                print("***************")
-                for reply in replies:
-                    print(f"===")
-                    for entry in reply:
-                        print(entry.get("role").upper(), ":")
-                        print("  ", entry.get("content"))
-                while agt_to_eval := input("<<Eval>> Which agent would you like to evaluate (blank to skip eval)? "):
-                    eval_score = input(f"<<Eval>> How satisfied are you with the {agt_to_eval}? ")
-                    try:
-                        eval_score = int(eval_score)
-                    except:
-                        eval_score = 0
-                    eval_feedback = input(f"<<Eval>> How can the {agt_to_eval} improve in the future? ")
-                    pm.evaluate_agent(agt_to_eval, eval_score, eval_feedback)
-                print("**********************")
-                prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
-                round_name = "Continuing"
+            with execassistant.ExecutiveAssistant() as ea:
+                prompt = "Check the issue_board directory for issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
+                round = 0
+                while prompt:
+                    open_issues = ea.follow_up()
+                    if open_issues:
+                        print(f"There are still open issues:{open_issues}")
+                    else:
+                        print(f"no more open issues.")
+                    ea_reply = ea.perform_task(prompt, f"round:{round:04d}")
+                    print(f"EA reply: {ea_reply}")
+                    prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
+                    round += 1
