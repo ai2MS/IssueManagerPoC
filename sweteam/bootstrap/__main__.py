@@ -90,6 +90,9 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
                 logger.debug(f"Initializing docker returned {init_Dockerfile_result}")
                 init_script_result = utils.initialize_startup_script()
                 logger.debug(f"Initializing startup script returned {init_script_result}")
+                os.makedirs("docs/design", exist_ok=True)
+                with open("docs/design/dir_structure.yaml", "w") as dddf:
+                    dddf.write(utils.dir_tree("."))
                 logger.info(f"and project <{project_name}> is initialized with bootstrap code.")
         except Exception as e:
             logger.fatal(f"Error {e} setting up project: " + project_dir)

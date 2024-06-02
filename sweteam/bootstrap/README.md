@@ -14,22 +14,38 @@ The utils.py has some supporting functionalities like the tools definition that 
 The agents directory contains the .json definitions of the agents, most importantly, the instruction for each agent. And if needed, it can also define additional agent specific tools that can be used by the specific agent.
 
 ### Project Directory Structure
-sweteam:
-  - sweteam:
-    - bootstrap:
-        - __init__.py
-        - __main__.py
-        - agent.py
-        - utils.py
-        - agents:
-          - pm.json
-          - architect.json
-          - developer.json
-          - tester.json
-        - issue_board:
-          - 0.json
-        - docs:
-        - README.md
+- {project_root}:
+  - bootstrap:
+    - README.md: Software Engineering Team Software Specification Description
+    - execassistant.py: The executive assistant agent logic
+    - __main__.py: initialize a software development project
+    - defs.py: This module contains initial definitions for the agent instructions
+        and tools.
+    - config.py: ''
+    - agent.py: Core Agent Class code sfor OpenAI"""
+    - utils.py: ''
+    - __init__.py: ''
+    - __pycache__:
+      - agent.cpython-312.pyc: ''
+      - config.cpython-312.pyc: ''
+      - __main__.cpython-312.pyc: ''
+      - utils.cpython-312.pyc: ''
+      - __main__.cpython-310.pyc: ''
+      - defs.cpython-312.pyc: ''
+      - __init__.cpython-312.pyc: ''
+      - pm.cpython-310.pyc: ''
+      - __init__.cpython-310.pyc: ''
+      - pm.cpython-312.pyc: ''
+    - agents:
+      - techlead.json: ''
+      - pm.json: ''
+      - designer.json: ''
+      - tester.json: ''
+      - sre.json: ''
+      - frontend_dev.json: ''
+      - backend_dev.json: ''
+      - architect.json: ''
+
 
 ### Additional Considerations
 - The __main__.py script will check if itself runs as bootstrap, if so, it creates the {project}_team directory, and copy the code from the bootstrap, but is expected to evolve from there. 

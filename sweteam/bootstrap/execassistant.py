@@ -134,22 +134,30 @@ class ExecutiveAssistant(agent.OpenAI_Agent):
             else:
                 self.issue_vector_store = self.llm_client.beta.vector_stores.create(name=ISSUE_VECTOR_STORE_NAME)
 
-            uploaded_issues = self.llm_client.beta.vector_stores.files.list(vector_store_id=self.issue_vector_store.id)
+            uploaded_issue_file_ids = self.llm_client.beta.vector_stores.files.list(vector_store_id=self.issue_vector_store.id)
+            
+            try:
+                uploaded_issues = []
 
-            issue_files = [os.path.join(root, file) for root, _, files in os.walk("issue_board") for file in files if file.endswith(".json")]
+                for f in uploaded_issue_file_ids.data:
+                    uploaded_issues.append(self.llm_client.files.retrieve(f.id)) 
+            except Exception as e:
+                logger.warning(f"<{self.name}> - some files in the vec store cannot be retrieved.")
 
             issue_files_to_upload = []
+            issue_files = [os.path.join(root, file) for root, _, files in os.walk("issue_board") for file in files if file.endswith(".json")]
             for issue_file in issue_files:
-                already_uploaded = [upliss for upliss in uploaded_issues.data if upliss['name'] == issue_file]
-                if already_uploaded and os.stat(issue_file).st_mtime < already_uploaded[0].get('created_at', 0):
-                    continue
-                else:
+                last_uploaded_at = max([upliss.created_at for upliss in uploaded_issues if upliss.filename == os.path.basename(issue_file)], default=0)
+                if os.stat(issue_file).st_mtime > last_uploaded_at:
                     issue_files_to_upload.append(issue_file)
-            with contextlib.ExitStack() as stack:  
-                file_streams = [stack.enter_context(open(path, "rb")) for path in issue_files_to_upload]
-                file_batch = self.llm_client.beta.vector_stores.file_batches.upload_and_poll(
-                    vector_store_id=self.issue_vector_store.id, files=file_streams
-                )
+                else:
+                    continue
+            if issue_files_to_upload:
+                with contextlib.ExitStack() as stack:  
+                    file_streams = [stack.enter_context(open(path, "rb")) for path in issue_files_to_upload]
+                    file_batch = self.llm_client.beta.vector_stores.file_batches.upload_and_poll(
+                        vector_store_id=self.issue_vector_store.id, files=file_streams
+                    )
         except Exception as e:
             logger.error(f"<{self.name}> - upload files received error {e} - line {e.__traceback__.tb_lineno}")
         else:

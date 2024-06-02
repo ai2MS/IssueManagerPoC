@@ -5,8 +5,18 @@
     "tool_choice": {
         "type": "function",
         "function": {
-            "name": "write_to_file"
+            "name": "update_text_file"
         }
     },
+    "evaluation_criteria":[
+        {"type": "question",
+        "question": "Which files did the backend_dev update?"},
+        {"type": "question",
+        "question": "Did backend_dev update the issues he was asked to work on?"},
+        {"type":"question",
+        "question" : "Did the backend_dev provide testing steps for the new functionalities?"},
+        {"type": "question",
+        "question" : "When you execute the test, did the outcome meet expectations of the issue requirement?"}
+    ],
     "tools": []
 }

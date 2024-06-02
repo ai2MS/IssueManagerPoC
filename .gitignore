@@ -5,6 +5,5 @@ default_project/
 saved_project_*
 /*.log
 **/__pycache__
-**__pycache__
 .pytest_cache
 /test.deleteme
