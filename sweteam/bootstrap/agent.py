@@ -10,13 +10,14 @@ from openai import OpenAI, AzureOpenAI
 import yaml
 
 if __package__:
-    from .utils import standard_tools, project_name
+    from .utils import standard_tools, project_name, issue_manager
+    from .config import config
     from . import logger, agents, msg_logger
 else:
     print("Not running as a package, importing from current directory.")
-    from utils import  standard_tools, project_name
+    from utils import  standard_tools, project_name, issue_manager
+    from config import config
     from __init__ import logger, agents, msg_logger
-
 
 
 # class Ollama_Agent:
@@ -64,8 +65,8 @@ class OpenAI_Agent:
     thread = None
     tools = None
     llm_client = None
-    llm_service = ollama
-    model = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME","gpt-4-turbo-2024-04-09")
+    llm_service = None
+    model = config.AZURE_OPENAI_DEPLOYMENT_NAME
     name = ""
     tool_choice = "auto"
     temperature = 1
@@ -92,7 +93,7 @@ class OpenAI_Agent:
             >>> agent = OpenAI_Agent("tester")
 
         """
-        useAzureOpenAI = os.environ.get('USE_AZURE') == "True"
+        useAzureOpenAI = config.USE_AZURE
         logger.info(f"Initializing agent {agent_name}")
         self.file_name = __file__
         self.name = agent_name
@@ -117,10 +118,10 @@ class OpenAI_Agent:
             except Exception as e:
                 logger.warning(f"<{self.name}> - error setting other_agent_list in chat_with_other_agent tools function. Please check: {e}")
             if (useAzureOpenAI):
-                self.model = os.environ.get('AZURE_OPENAI_DEPLOYMENT_NAME',None)
+                self.model = config.AZURE_OPENAI_DEPLOYMENT_NAME
                 #Azure does not support #self.tools.append({"type":"retrieval"})
             else:
-                self.model = os.environ.get('OPENAI_MODEL',None)
+                self.model = config.OPENAI_MODEL
                 self.tools.append({"type":"file_search"})
         except json.decoder.JSONDecodeError:
             logger.fatal(f"{agent_name}m.json file is not valid JSON. Please fix the pm.json file.")
@@ -139,21 +140,19 @@ class OpenAI_Agent:
         Returns:
             None
         """
-        useAzureOpenAI = os.environ.get('USE_AZURE') == "True"
+        useAzureOpenAI = config.USE_AZURE
         try:
             if (useAzureOpenAI):
-                azure_openai_api_key=os.environ.get('AZURE_OPENAI_API_KEY', None)
-                if azure_openai_api_key is None:
+                if config.AZURE_OPENAI_API_KEY is None:
                     logger.fatal(f"Please provide AZURE_OPENAI_API_KEY as environment variable.  Cannot continue without AZURE_OPENAI_API_KEY.")
                     exit()
                 logger.info("Using Azure OpenAI API")
-                self.llm_client = AzureOpenAI(api_key=os.environ.get('AZURE_OPENAI_API_KEY'))
+                self.llm_client = AzureOpenAI(api_key=config.AZURE_OPENAI_API_KEY)
             else:
-                openai_api_key=os.environ.get('OPENAI_API_KEY', None)
-                if openai_api_key is None:
+                if config.OPENAI_API_KEY is None:
                     logger.fatal(f"Please provide OPENAI_API_KEY as environment variable.  Cannot continue without OPENAI_API_KEY.")
                     exit()
-                self.llm_client = OpenAI(api_key=openai_api_key)
+                self.llm_client = OpenAI(api_key=config.OPENAI_API_KEY)
         except Exception as e:
             logger.fatal(f"Failed to establish OpenAI client with error {e}.")
             exit()
@@ -187,9 +186,15 @@ class OpenAI_Agent:
 
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        logger.debug(f"Exiting agent {self.name}")
-        self.llm_client.beta.threads.delete(thread_id=self.thread.id)
-        self.llm_client.beta.assistants.delete(assistant_id=self.assistant.id)
+        logger.debug(f"<{self.name}> - Exiting agent ...")
+        try:
+            self.llm_client.beta.threads.delete(thread_id=self.thread.id)
+        except Exception as e:
+            logger.warning(f"<{self.name}> - deleting thread received Error: {e}")
+        try:
+            self.llm_client.beta.assistants.delete(assistant_id=self.assistant.id)
+        except Exception as e:
+            logger.warning(f"<{self.name}> - deleting assistant received Error: {e}")
 
 
 
@@ -208,177 +213,8 @@ class OpenAI_Agent:
 
     # method to list/read/write issues
     def issue_manager(self, action: str, issue: str = '', only_in_state: list = [], content: str = None, assignee: str = None):
-        ISSUE_BOARD_DIR = "issue_board"
-        content_obj = {}
-        logger.debug(f"<{self.name}> - entering - issue_manager({action}, {issue}, {only_in_state}, {content})")
-        if isinstance(content, str):
-            try:
-                content_obj = json.loads(content.replace("\n", "\\n")) #correct one of the most common json string error - have newline instead of \\n in it.
-            except Exception as e:
-                logger.warning(f"<{self.name}> - issue_manager {action} cannot parse content {content}.")
-                return (f"Error parsing {content}, please make sure content is a proper json object.")
-        else:
-            content_obj = content
-        logger.debug(f"<{self.name}> - issue_manager, {type(content_obj)}, {isinstance(content_obj, dict)}, {content_obj}")
-        match action:
-            case 'list':
-                issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                results = []
-                for root, dirs, files in os.walk(issue_dir):
-                    for file in files:
-                        if file=="issue.json":
-                            file_path = os.path.join(root, file)
-                            issue_number = root.removeprefix(ISSUE_BOARD_DIR+'/')
-                            try:
-                                with open(file_path, 'r') as f:
-                                    data = json.load(f)
-                                updates = data.get('updates', [])
-                                updates.sort(key=lambda x: x.get('updated_at',0))
-                                if updates:
-                                    latest_status = [u for u in updates if u.get('status', "")] 
-                                    status = latest_status[-1].get('status', "unknown") if latest_status else "new"
-                                    latest_priority = [u for u in updates if u.get('priority', "")] 
-                                    priority = latest_priority[-1].get('priority', "5 - unknown") if latest_status else "1 - Low"
-                                    latest_updated_by = [u for u in updates if u.get('updated_by', "")] 
-                                    updated_by = latest_updated_by[-1].get('updated_by', "unknown") if latest_updated_by else "unknown"
-                                    latest_assignee = [u for u in updates if u.get('assignee', "")] 
-                                    assigned_to = latest_assignee[-1].get('assignee', updated_by) if latest_assignee else updated_by
-                                else:
-                                    status = data.get('status', "new")
-                                    priority = data.get('priority', "1 - Low")
-                                    updated_by = data.get('updated_by', "unknown")
-                                    assigned_to = data.get('assignee', updated_by)
-                                if only_in_state and "in progress" in only_in_state:
-                                    # sometimes AI will use "in process" instead of "in progress", we will try to accommodate that.s
-                                    only_in_state.append("in process")
-                                if only_in_state and status not in only_in_state:
-                                    continue
-                                if assignee and assignee != assigned_to:
-                                    continue
-                                if priority.lower().strip() in ["low", "medium", "high", "urgent"]:
-                                    pri_rank = {"low": 4, "medium": 3, "high": 2, "critical":1, "urgent": 0}
-                                    priority = f"{pri_rank[priority.lower()]} - {priority.capitalize()}"
-                                results.append({'issue':issue_number, 'priority':priority, 'status':status, 'assignee': assigned_to, 'title': data.get('title', "no title")})
-                            except json.JSONDecodeError:
-                                logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
-                                results.append({'issue':issue_number, 'status':f"Error Decoding Json"})
-                            except FileNotFoundError:
-                                logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error file not found: {file_path}")
-                                results.append({"issue":issue_number, "status":f"Error file not found"})
-                            except Exception as e:
-                                logger.error(f"<{self.name}> - issue_manager/list - issue#{issue_number} - Error decoding JSON from file: {file_path}")
-                                results.append({"issue":issue_number, "status":f"Error {e}"})
+        return issue_manager( action, issue, only_in_state, content, assignee, caller=self.name)
 
-                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {results}")
-                return json.dumps(results)
-            case "create":
-                try:
-                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                    if not os.path.exists(issue_dir):
-                        os.makedirs(issue_dir, exist_ok=True)
-                    existing_sub_issues = [int(entry.name) for entry in os.scandir(issue_dir) 
-                                        if entry.is_dir() 
-                                        and entry.name.isdigit() 
-                                        and os.path.exists(os.path.join(issue_dir, entry.name, "issue.json"))] 
-                    new_issue_number = f"{max([issue_no for issue_no in existing_sub_issues], default=0) + 1}"
-                    if 'created_at' not in content_obj:
-                        content_obj['created_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if 'updates' not in content_obj or not content_obj['updates']:
-                        content_obj['updates'] = [{}]
-                    if 'updated_by' not in content_obj['updates'][-1]:
-                        content_obj['updates'][-1]['updated_by'] = self.name
-                    if 'updated_at' not in content_obj['updates'][-1]:
-                        content_obj['updates'][-1]['updated_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if 'priority' not in content_obj['updates'][-1]:
-                        content_obj['updates'][-1]['priority'] = "1 - Low"
-                    if 'assignee' not in content_obj['updates'][-1]:
-                        content_obj['updates'][-1]['assignee'] = self.name
-                    if 'status' not in content_obj['updates'][-1]:
-                        content_obj['updates'][-1]['status'] = "new"
-                    
-                    new_issue_dir = os.path.join(issue_dir, new_issue_number)
-                    if not os.path.exists(new_issue_dir):
-                        os.makedirs(new_issue_dir, exist_ok=True)
-
-                    new_issue_file = os.path.join(issue_dir, new_issue_number,"issue.json")
-                    with open(new_issue_file, 'w') as ifh:
-                        result = json.dump(content_obj,ifh)
-                        result = f"Issue {issue} created."
-                except Exception as e:
-                    logger.error(f"<{self.name}> issue_manager/create issue {new_issue_number} error {e}: lineno:{e.__traceback__.tb_lineno}")
-                    result = f"Error creating issue {new_issue_number}. Error: {e}"
-
-                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {result}")
-                return result
-            case "read":
-                try:
-                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                    issue_file = os.path.join(issue_dir, "issue.json")
-                    with open(issue_file, 'r') as jsonfile:
-                        result = json.load(jsonfile)
-                    
-                except Exception as e:
-                    logger.error(f"<{self.name}> issue_manager/read issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
-                    result = f"Error Reading issue {issue} - Error: {e}"
-                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {result}")
-                return json.dumps(result)
-            case "update":
-                try:
-                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                    issue_file = os.path.join(issue_dir, "issue.json")
-                    with open(issue_file, 'r') as ifile:
-                        issue_content = json.load(ifile)
-                    if content_obj and "updated_at" not in content_obj:
-                        content_obj['updated_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if content_obj and "updated_by" not in content_obj:
-                        content_obj['updated_by'] = self.name
-                    if content_obj and "assignee" not in content_obj:
-                        content_obj['assignee'] = self.name
-                    if issue_content and "updates" in issue_content:
-                        issue_content['updates'].append(content_obj)
-                    else:
-                        issue_content['updates'] = [content_obj]
-                    with open(issue_file, 'w') as ifile:
-                        result = json.dump(issue_content, ifile)
-                        result = f"Issue {issue} updated successfully."
-                except Exception as e:
-                    logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
-                    result = f"Error Updating issue {issue} - Error: {e}"
-                logger.debug(f"<{self.name}> - issue_manager({action}, {issue}...) returned {result}")
-                return result
-            case "assign":
-                try:
-                    issue_dir = os.path.join(ISSUE_BOARD_DIR, issue)
-                    issue_file = os.path.join(issue_dir, "issue.json")
-                    with open(issue_file, 'r') as ifile:
-                        issue_content = json.load(ifile)
-                    if not content:
-                        content_obj = {}
-                    if "updated_at" not in content_obj:
-                        content_obj['updated_at'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-                    if "updated_by" not in content_obj:
-                        content_obj['updated_by'] = self.name
-                    if "details" not in content_obj:
-                        content_obj['details'] = f"assign {issue} to {assignee} by {self.name}."
-                    if assignee:
-                        content_obj['assignee'] = assignee
-                    if issue_content and "updates" in issue_content:
-                        issue_content['updates'].append(content_obj)
-                    else:
-                        issue_content['updates'] = [content_obj]
-                    with open(issue_file, 'w') as ifile:
-                        result = json.dump(issue_content, ifile)
-                        result = f"Assigned {issue} to {assignee} successfully."
-                except Exception as e:
-                    logger.error(f"<{self.name}> issue_manager/update issue {issue} error {e}: s{e.__traceback__.tb_lineno}")
-                    result = f"Error Updating issue {issue} - Error: {e}"
-
-                logger.debug(f"<{self.name}> - exiting - issue_manager({action}, {issue}...) returned {result}")
-                return result
-
-            case _:
-                logger.warn(f"<{self.name}> - exiting - issue_manager({action}, ...) {action} is not a valid action.")
-                return (f"Invalid action: {action}")
             
     # the following are function tools for OpenAI assistants.
     def read_from_file(self, filename: str = None) -> str:
@@ -465,7 +301,7 @@ class OpenAI_Agent:
         Example::
             >>> agent = OpenAI_Agent("tester")
             >>> agent.list_dir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"issue_board"), True).split('\\n')[:4]
-            ["'0':", '  issue.json:', '    attributes:', '      mode: 0o100644']
+            ["'0':", '  0.json:', '    attributes:', '      mode: 0o100644']
         """
         contents = []
         if not path or path.startswith("/"):
@@ -513,7 +349,7 @@ class OpenAI_Agent:
 
         """
         current_message = None
-        retry_count = int(os.environ.get('RETRY_COUNT', 3))
+        retry_count = config.RETRY_COUNT
         logger.info(f"<{self.name}> TASK:BEGIN from:{from_} - task:{task} - retries left:{retry_count}")
         if not task:
             task = self.instruction
@@ -848,8 +684,7 @@ class OpenAI_Agent:
                                            stdout=subprocess.PIPE,
                                            stderr=subprocess.PIPE,
                                            text=True,
-                                           shell=False,
-                                           timeout=1200)
+                                           shell=False)
                 self.procs.append(process)
                 logger.debug(f"<{self.name}> - execute_command - started parallel process: {process.pid}")
             else:

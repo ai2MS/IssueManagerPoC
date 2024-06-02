@@ -32,7 +32,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "sweteam.bootstrap",
-            "args": ["${command:pickArgs}"],
+            "args": "${command:pickArgs}",
             "subProcess": false
         },
         {

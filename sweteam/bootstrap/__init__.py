@@ -18,13 +18,17 @@ Usage:
     python -m default_project.team
     all arguments are ignored, this will continue the previously setup project
 """
-import json
+
 import logging
 import os
 import contextlib
+from .config import config
+
+
+
 
 logger = logging.getLogger(__name__)
-match os.environ.get("LOG_LEVEL"):
+match config.LOG_LEVEL:
     case "DEBUG":
         logger.setLevel(logging.DEBUG)
     case "INFO"|"LOG":
@@ -71,16 +75,16 @@ def load_agents():
     logger.debug(f"package name: {__package__}")
     if (my_name != 'bootstrap'):
         agents_list = [entry.removesuffix(".json") for entry in os.listdir(agents_dir) if entry.endswith(".json")]
-        with contextlib.ExitStack() as stack:
-            # for agt in agents_list:
-            #     agents.append(agent.OpenAI_Agent(agt.removesuffix(".json"), agents_dir))
-            agents.extend([stack.enter_context(agent.OpenAI_Agent(agt, agents_dir)) for agt in agents_list])
+        with execassistant.ExecutiveAssistant() as ea:
+            with contextlib.ExitStack() as stack:
+                # for agt in agents_list:
+                #     agents.append(agent.OpenAI_Agent(agt.removesuffix(".json"), agents_dir))
+                agents.extend([stack.enter_context(agent.OpenAI_Agent(agt, agents_dir)) for agt in agents_list])
             
-
-            with execassistant.ExecutiveAssistant() as ea:
                 prompt = "Check the issue_board directory for issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements."
                 round = 0
                 while prompt:
+                    ea.upload_issues_as_vector_store()
                     open_issues = ea.follow_up()
                     if open_issues:
                         print(f"There are still open issues:{open_issues}")
@@ -90,3 +94,4 @@ def load_agents():
                     print(f"EA reply: {ea_reply}")
                     prompt = input("\n***Please follow up, or just press enter to finish this session:\n")
                     round += 1
+                logger.info(f"Existing...")

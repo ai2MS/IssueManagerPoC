@@ -14,6 +14,7 @@ import sys
 import shutil
 import subprocess
 from . import logger, utils
+from .config import config
 
 def main(project_name: str = 'default_project', overwrite: bool = False) -> None:
     """
@@ -55,22 +56,21 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
             except Exception as e:
                 logger.fatal(f"Error setting up branch for {project_name}. Can't continue.")
                 exit(1)
-            if overwrite:
-                logger.warn(f"'-n' flag is set, Deleting existing project <{project_name}>")
-                shutil.rmtree(project_dir, ignore_errors=True)
+
             if os.path.exists(project_dir):
                 os.chdir(project_dir)
                 if os.path.exists(os.path.join(project_dir, "pyproject.toml")):
                     poetry_version_result = subprocess.run(['poetry', 'version'], capture_output=True, text=True)
                     poetry_version_result.check_returncode()
                     if poetry_version_result.stdout.split()[0] == project_name.replace("_", "-"):
-                        logger.info(f"Project <{project_name}> is already initialized.")
+                        logger.info(f"Project <{project_name}> has already been previously initialized.")
                     else:
                         logger.error(f"Directory {project_dir} already contain a project that is called {poetry_version_result.stdout.split()[0]}, can't initialize it as {project_name}")
                         sys.exit(1)
                 else:
                     poetry_init_result = subprocess.run(['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
                     poetry_init_result.check_returncode()
+                    overwrite = True
                     logger.info(f"New project <{project_name}> is initialized.")
             else:
                 poetry_new_result = subprocess.run(['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
@@ -82,6 +82,8 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
 
             if overwrite:
                 copy_directory(current_dir, project_team_dir)
+                init_agent_files = utils.initialize_agent_files()
+                logger.debug(f"Initializing agent files returned {init_agent_files}")
                 init_package_result = utils.initialize_package(os.path.join(project_dir, os.path.basename(project_dir)))
                 logger.debug(f"Initializing package returned {init_package_result}")
                 init_Dockerfile_result = utils.initialize_Dockerfile(project_name)
@@ -172,7 +174,7 @@ if __name__ == "__main__":
     match __package__:
         case s if s.endswith("bootstrap"):
             try:
-                utils.project_name = os.environ.get("PROJECT_NAME", "default_project")
+                utils.project_name = config.PROJECT_NAME
                 overwrite = False
                 for arg in sys.argv:
                     if arg == "-p":
