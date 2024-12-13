@@ -8,13 +8,47 @@ Usage:
     -n means start over, it will delete the existing "team" of agents for the project and copy the bootstrap agents over.
 
 """
+import contextlib
 from datetime import datetime
 import os
 import sys
 import shutil
 import subprocess
-from . import logger, utils
+from . import ollama_agent, utils, logging, logger
 from .config import config
+from .utils.log import logging_context
+
+
+def load_agents():
+    from . import execassistant
+    ea = None
+    if __package__ and __package__.endswith("bootstrap"):
+        print(f"Warning, Current package name: {__package__}")
+    agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
+    logger.debug(f"package name: {__package__}")
+    agents_list = [entry.removesuffix(".json") for entry in os.listdir(
+        agents_dir) if entry.endswith(".json")]
+    with execassistant.OllamaExecutiveAssistant() as ea:
+        with contextlib.ExitStack() as stack:
+            for agt in agents_list:
+                stack.enter_context(ollama_agent.Ollama_Agent(agt, agents_dir))
+
+            prompt = "Use issue_manager list issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements, and create a new issue for the new request, then assign the issue to the agent who is best to write the code (i.e. bigger project should be assigned to pm, simpler request should be assigned to developers)."
+            round = 0
+            while prompt:
+                ea_reply = ea.perform_task(prompt, f"round:{round:04d}")
+                open_issues = ea.follow_up()
+                print(f"EA reply: {ea_reply}")
+                if open_issues:
+                    print(f"There are still open issues:{open_issues!r}")
+                else:
+                    print(f"no more open issues.")
+                prompt = input(
+                    "\n***Please follow up, or just press enter to finish this session:\n")
+                round += 1
+            logger.info(f"Exiting...")
+    logger.info(f"Exiting Done")
+
 
 def main(project_name: str = 'default_project', overwrite: bool = False) -> None:
     """
@@ -40,82 +74,121 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
             current_parent_dir = os.path.dirname(current_dir)
             project_dir = os.path.join(os.getcwd(), project_name)
             parent_dir = os.path.dirname(project_dir)
-            project_team_dir = os.path.join(project_dir, EMBEDDED_DEV_TEAM_NAME)
+            project_team_dir = os.path.join(
+                project_dir, EMBEDDED_DEV_TEAM_NAME)
             try:
-                current_git_branch = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True, check=True).stdout.strip()
+                current_git_branch = subprocess.run(
+                    ['git', 'branch', '--show-current'], capture_output=True, text=True, check=True).stdout.strip()
                 logger.debug(f"Currently on branch {current_git_branch}")
                 if (current_git_branch in ["main", "master"]):
                     old_branch_name = current_git_branch
-                    logger.warn(f"??Currently on branch <{current_git_branch}>, we shall never change it without a PR. creating new branch...")
-                    all_branches = subprocess.run(['git', 'branch', '--list'], capture_output=True, text=True).stdout
-                    new_branch_name = f"{project_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    logger.warning(f"??Currently on branch <"
+                                   f"{current_git_branch}>, we shall never "
+                                   "change it without a PR. creating new branch...")
+                    all_branches = subprocess.run(
+                        ['git', 'branch', '--list'], capture_output=True, text=True).stdout
+                    new_branch_name = f"{
+                        project_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                     if new_branch_name in [branch_name.strip() for branch_name in all_branches.split()]:
-                        new_branch_name = f"{project_name}-{datetime.now().strftime('%Y%m%d%H%M%S.%f')}"
-                    return_text = subprocess.run(['git', 'checkout', '-b', new_branch_name], capture_output=True, text=True).stdout.strip()
-                    logger.debug(f"creating new branch {new_branch_name} returned {return_text}")
+                        new_branch_name = f"{
+                            project_name}-{datetime.now().strftime('%Y%m%d%H%M%S.%f')}"
+                    return_text = subprocess.run(
+                        ['git', 'checkout', '-b', new_branch_name], capture_output=True, text=True).stdout.strip()
+                    logger.debug(f"creating new branch {new_branch_name} "
+                                 f"returned {return_text}")
             except Exception as e:
-                logger.fatal(f"Error setting up branch for {project_name}. Can't continue.")
+                logger.fatal(f"Error setting up branch for {project_name}. "
+                             "Can't continue.")
                 exit(1)
 
             if os.path.exists(project_dir):
                 os.chdir(project_dir)
                 if os.path.exists(os.path.join(project_dir, "pyproject.toml")):
-                    poetry_version_result = subprocess.run(['poetry', 'version'], capture_output=True, text=True)
+                    poetry_version_result = subprocess.run(
+                        ['poetry', 'version'], capture_output=True, text=True)
                     poetry_version_result.check_returncode()
                     if poetry_version_result.stdout.split()[0] == project_name.replace("_", "-"):
-                        logger.info(f"Project <{project_name}> has already been previously initialized.")
+                        logger.info(
+                            f"Project <{project_name}> has already been previously initialized.")
                     else:
-                        logger.error(f"Directory {project_dir} already contain a project that is called {poetry_version_result.stdout.split()[0]}, can't initialize it as {project_name}")
+                        logger.error(f"Directory {project_dir} already contain "
+                                     f"a project that is called "
+                                     f"{poetry_version_result.stdout.split()[
+                                         0]}, "
+                                     f"can't initialize it as {project_name}")
                         sys.exit(1)
                 else:
-                    poetry_init_result = subprocess.run(['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
+                    poetry_init_result = subprocess.run(
+                        ['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
                     poetry_init_result.check_returncode()
                     overwrite = True
-                    logger.info(f"New project <{project_name}> is initialized.")
+                    logger.info(f"New project <{project_name}> is initialized."
+                                )
             else:
-                poetry_new_result = subprocess.run(['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
+                poetry_new_result = subprocess.run(
+                    ['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
                 poetry_new_result.check_returncode()
                 logger.info(f"New project <{project_name}> is created.")
-                copy_directory(os.path.join(current_parent_dir,"issue_board"), os.path.join(project_dir, "issue_board"))
+                copy_directory(os.path.join(current_parent_dir, "issue_board"), os.path.join(
+                    project_dir, "issue_board"))
                 os.chdir(project_dir)
                 overwrite = True
 
             if overwrite:
-                copy_directory(current_dir, project_team_dir)
+                logger.debug(f"overwrite flag set to {overwrite}, copying bootstrap to {project_team_dir}")
                 init_agent_files = utils.initialize_agent_files()
-                logger.debug(f"Initializing agent files returned {init_agent_files}")
-                init_package_result = utils.initialize_package(os.path.join(project_dir, os.path.basename(project_dir)))
-                logger.debug(f"Initializing package returned {init_package_result}")
-                init_Dockerfile_result = utils.initialize_Dockerfile(project_name)
-                logger.debug(f"Initializing docker returned {init_Dockerfile_result}")
+                logger.debug(f"Initializing agent files returned "
+                             f"{init_agent_files}")
+                copy_directory(current_dir, project_team_dir)
+                init_package_result = utils.initialize_package(
+                    os.path.join(project_dir, os.path.basename(project_dir)))
+                logger.debug(f"Initializing package returned "
+                             f"{init_package_result}")
+                init_Dockerfile_result = utils.initialize_Dockerfile(
+                    project_name)
+                logger.debug(f"Initializing docker returned "
+                             f"{init_Dockerfile_result}")
                 init_script_result = utils.initialize_startup_script()
-                logger.debug(f"Initializing startup script returned {init_script_result}")
-                os.makedirs("docs/design", exist_ok=True)
-                with open("docs/design/dir_structure.yaml", "w") as dddf:
-                    dddf.write(utils.dir_tree("."))
-                logger.info(f"and project <{project_name}> is initialized with bootstrap code.")
+                logger.debug(f"Initializing startup script returned "
+                             f"{init_script_result}")
+                os.makedirs(os.path.dirname(
+                    config.DIR_STRUCTURE_YAML), exist_ok=True)
+                with open(config.DIR_STRUCTURE_YAML, "w") as dddf:
+                    dddf.write(utils.dir_structure("."))
+                logger.info(f"and project <{project_name}> is initialized "
+                            "with bootstrap code.")
         except Exception as e:
-            logger.fatal(f"Error {e} setting up project: " + project_dir)
+            logger.fatal("Error %s setting up project: %s", e, project_name, exc_info=e)
             sys.exit(101)
-        
+
         try:
             os.chdir(project_dir)
             # import importlib
             # sys.path.insert(0, project_dir)
             # actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
             # actual_project_team.load_agents()
-            poetry_result = subprocess.run(['poetry', 'install'], capture_output=True, text=True)
+            poetry_result = subprocess.run(
+                ['poetry', 'install'], capture_output=True, text=True)
             poetry_result.check_returncode()
-            logger.info(f"Project <{project_name} is initialized with bootstrap code. Transferring execution to project <{project_name}>")
-            poetry_result = subprocess.run(['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name], check=True)
+            logger.info(f"Project <{project_name} is initialized with "
+                        f"bootstrap code. Transferring execution to project"
+                        f" <{project_name}>")
+            poetry_result = subprocess.run(
+                ['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name, "-C", project_dir], check=True)
         except Exception as e:
-            logger.error(f"{project_name} agents run into errors {e}. stack: {str(e)}")
+            logger.error(f"{project_name} agents run into errors "
+                         f"{e}. stack: {str(e)}")
             if new_branch_name:
-                response = input(f"{project_name} agents run into errors, do you want to drop the new git branch {new_branch_name}?")
+                response = input(f"{project_name} agents run into errors, do "
+                                 f"you want to drop the new git branch "
+                                 f"{new_branch_name}?")
                 if response.lower() in ["y", "yes"]:
-                    subprocess.run(['git', 'reset', '--hard'], capture_output=True, text=True)
-                    subprocess.run(['git', 'checkout', old_branch_name], capture_output=True, text=True)
-                    subprocess.run(['git', 'branch', '-D', new_branch_name], capture_output=True, text=True)
+                    subprocess.run(['git', 'reset', '--hard'],
+                                   capture_output=True, text=True)
+                    subprocess.run(
+                        ['git', 'checkout', old_branch_name], capture_output=True, text=True)
+                    subprocess.run(
+                        ['git', 'branch', '-D', new_branch_name], capture_output=True, text=True)
 
     elif __package__:
         # if invoke the project.team instead of the bootstrap
@@ -125,27 +198,37 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
         project_dir = current_parent_dir
 
         try:
-            current_git_branch = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True)
+            current_git_branch = subprocess.run(
+                ['git', 'branch', '--show-current'], capture_output=True, text=True)
             logger.debug(f"Currently on branch {current_git_branch}")
             os.chdir(project_dir)
             if (current_git_branch in ["main", "master"]):
-                logger.fatal(f"??Currently on branch <{current_git_branch}>, we shall never change it without a PR. \nPlease create a new branch or switch to one of the following branches...")
-                all_branches = subprocess.run(['git', 'branch', '--list'], capture_output=True, text=True)
+                logger.fatal(f"??Currently on branch <{current_git_branch}>, "
+                             "we shall never change it without a PR.\n"
+                             "Please create a new branch or switch to one of the following branches...")
+                all_branches = subprocess.run(
+                    ['git', 'branch', '--list'], capture_output=True, text=True)
                 for branch in sorted(all_branches, reverse=True):
                     print(f"- {branch}")
                     exit(1)
         except FileNotFoundError:
-            logger.fatal(f"It seems git was not installed on this system. Can't continue without git.")
+            logger.fatal(
+                f"It seems git was not installed on this system. Can't continue without git.")
             exit(2)
         except Exception as e:
             logger.fatal(f"Error setting up git env: {e}, can't continue.")
             exit(1)
 
-        from . import load_agents
-        logger.debug(f"Invoked as {__package__}, not bootstrap, loading agents")
-        load_agents()
+        logger.debug(
+            f"Invoked as {__package__}, not bootstrap, loading agents")
+        try:
+            load_agents()
+        except KeyboardInterrupt:
+            logging.shutdown()
+            exit(0)
     else:
-        logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.dirname(__file__)}")
+        logger.fatal(
+            f"__main__ can't run as a script, please execute it as a module using python -m {os.path.dirname(__file__)}")
         exit(1)
 
 
@@ -174,27 +257,31 @@ def copy_directory(src_dir, dst_dir):
 
 
 if __name__ == "__main__":
-    match __package__:
+    match __package__ or '':
         case s if s.endswith("bootstrap"):
             try:
-                utils.project_name = config.PROJECT_NAME
+                project_name = config.PROJECT_NAME
                 overwrite = False
                 for arg in sys.argv:
                     if arg == "-p":
-                        utils.project_name = sys.argv[sys.argv.index(arg) + 1]
+                        project_name = sys.argv[sys.argv.index(arg) + 1]
                     elif arg == "-o":
                         overwrite = sys.argv[sys.argv.index(arg) + 1] == "True"
             except IndexError:
-                logger.fatal(f"Error parsing arguments.\nUsage:\npython -m {os.path.basename(os.path.dirname(__file__))} [-p project_name] [-o True|False]\n")
+                logger.fatal(f"Error parsing arguments.\nUsage:\npython -m {os.path.basename(
+                    os.path.dirname(__file__))} [-p project_name] [-o True|False]\n")
                 sys.exit(1)
             except Exception as e:
                 logger.fatal(f"Error parsing arguments: {e}")
                 sys.exit(1)
-        case ''|None:
-            logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {os.path.basename(os.path.dirname(__file__))}")
+        case '' | None:
+            logger.fatal(f"__main__ can't run as a script, please execute it as a module using python -m {
+                         os.path.basename(os.path.dirname(__file__))}")
             exit(1)
         case _:
-            utils.project_name = os.path.basename(os.getcwd())
+            project_name = os.path.basename(os.getcwd())
             overwrite = False
 
-    main(utils.project_name, overwrite)
+    with logging_context(config.PROJECT_NAME, config.LOG_LEVEL_CONSOLE, config.LOG_LEVEL,
+                         log_file=config.PROJECT_NAME + ".log", level=config.LOG_LEVEL) as logger:
+        main(project_name, overwrite)

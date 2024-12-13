@@ -1,0 +1,25 @@
+
+- timestamp: '2024-09-23T05:24:28.769053'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure that you update the files in the docs/design/
+    directory with your design. Additionally, create sub-issues to set smaller and
+    clearer goals. Make sure to design the API document /docs/design/{issue_number}.API.md
+    for communication between frontend and backend. Ensure the outcome meets the expectations
+    of the issue requirement.
+
+- timestamp: '2024-09-23T09:49:37.537068'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to update files in the docs/design/ directory
+    with your design. Update the issues or create sub-issues to set smaller and clearer
+    goals. Design the API document in /docs/design/{issue_number}.API.md for communication
+    between frontend and backend. Ensure that the outcome meets the expectations of
+    the issue requirement when executing the test.
+
+- timestamp: '2024-09-29T21:50:29.872763'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure to update files in the docs/design/ directory
+    with your design. Also, create or update boilerplate project code that runs and
+    meets the expectations of the issue requirement.

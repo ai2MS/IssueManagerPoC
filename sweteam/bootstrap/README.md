@@ -1,14 +1,19 @@
-# Software Engineering Team Software Specification Description
+# Software Engineering Agents Team
 
 ### Overview
 This repo is a project that orchestrate LLM agents to function as different roles within a software Engineering team, including Product Manager(pm), Architect, Developer, Tester.
 It has a bare minimum core that is called bootstrap, this allows the start of a new project team, team and instantiate the four roles.
+
+Similar to managing human dev teams, a key to success is breaking down the "context window" so each agent, each session would have less context to worry about, this should in turn help increate the response quality -- even if the context window of base models increase, this should still be helpful for quality development. So "specialization" is still something helpful. 
+
+We will define dev_assistant to get what the developer agent spits out as ordinary response, extract the code in their response, and typical instructions like "update main.py with the following code", and implement these changes to the files.  This was originally considered unnecessary, as the developer agent should be able to handle such mndane tasks, but experiment shows these instructions delute the focus of the developer agent, and causing it to struggle with simply saving/updating files, and waste cycles and context windows on actually coding. 
+
 ### Detailed Components
 1. **agent.py**: 
-The agent.py is the main file that coordinates the creation of the agents, their capabilities like chat_with_other_agent, write_to_file, read_from_file, and get_human_input.
+The agent.py is the main file that coordinates the creation of the agents, their capabilities like chat_with_other_agent, write_to_file, read_file, and get_human_input.
 
-2. **utils.py**: 
-The utils.py has some supporting functionalities like the tools definition that can be used by OpenAI assistants to interact with the agents.
+2. **utils**: 
+The utils package has some supporting functionalities like the tools definition that can be used by OpenAI assistants or Ollama agent to interact with the system and other agents.
 
 3. **agent directory**: 
 The agents directory contains the .json definitions of the agents, most importantly, the instruction for each agent. And if needed, it can also define additional agent specific tools that can be used by the specific agent.

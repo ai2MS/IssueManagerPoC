@@ -1,35 +1,42 @@
 from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings
-import os
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "default_project"
     ISSUE_BOARD_DIR: str = "issue_board"
     LOG_LEVEL: str = "INFO"
-    AZURE_OPENAI_DEPLOYMENT_NAME: str
-    OPENAI_MODEL: str
+    LOG_LEVEL_CONSOLE: str = "WARNING"
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = ''
+    OPENAI_MODEL: str = ''
     USE_AZURE: bool = True
-    AZURE_OPENAI_API_KEY: str = None
-    OPENAI_API_KEY: str = None
+    AZURE_OPENAI_API_KEY: str = ''
+    OPENAI_API_KEY: str = ''
     RETRY_COUNT: int = 3
+    DIR_STRUCTURE_YAML: str = PROJECT_NAME + "/dir_structure.yaml"
+    OLLAMA_HOST: str = "http://172.17.0.1:11434"  # "http://localhost:11434"
+    OLLAMA_DEFAULT_BASE_MODEL: str = "mistral-nemo"
 
     @field_validator('PROJECT_NAME', 'ISSUE_BOARD_DIR', 'AZURE_OPENAI_DEPLOYMENT_NAME', 'OPENAI_MODEL', 'AZURE_OPENAI_API_KEY', 'OPENAI_API_KEY')
     def validate_alphanumeric_and_underscore(cls, v, field):
         if not all(char.isalnum() or char in '_-' for char in v):
-            raise ValueError(f'{field.name} must contain only alphanumeric characters and underscores')
+            raise ValueError(
+                f'{field.name} must contain only alphanumeric characters and underscores')
         return v
-    
+
     @field_validator('RETRY_COUNT')
     def check_app_port(cls, value):
         if not isinstance(value, int):
             raise ValueError('app_port must be an integer')
         return value
 
-config: Settings
+
 try:
     config = Settings()
 except ValidationError as e:
     print(f'Environment variable validation error: {e}')
+    config = BaseSettings()
+    exit()
 
 
 def test():
@@ -59,7 +66,7 @@ def test():
     12
     >>> config.USE_AZURE
     False
-    
+
     >>> os.environ['PROJECT_NAME'] = 'Invalid Project Name!'
     >>> os.environ['ISSUE_BOARD_DIR'] = 'Invalid Dir Name!'
     >>> os.environ['RETRY_COUNT'] = 'Invalid Retry Count'
@@ -84,6 +91,7 @@ def test():
     'default_project'
 
     """
+
 
 if __name__ == '__main__':
     import doctest
