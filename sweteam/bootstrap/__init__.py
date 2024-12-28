@@ -29,11 +29,3 @@ from .utils import get_logger
 logger = get_logger((__package__ or __name__ or ""))
 
 my_name = (config.PROJECT_NAME or os.path.basename(os.getcwd()))
-msg_logger = logging.getLogger("message_log")
-if __package__ and not __package__.endswith("bootstrap"):
-    msg_file_handler = logging.FileHandler(f"{my_name}_messages.log")
-    msg_file_format = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s')
-    msg_file_handler.setFormatter(msg_file_format)
-    msg_logger.addHandler(msg_file_handler)
-    msg_logger.setLevel(logging.INFO)

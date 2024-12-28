@@ -5,12 +5,12 @@ import re
 import sys
 import time
 from datetime import datetime
-import subprocess
+import contextlib
 from openai import OpenAI, AzureOpenAI
 import yaml
-from .config import config
-from . import msg_logger
-from .defs import standard_tools, BaseAgent
+from ..config import config
+from . import msg_logger, BaseAgent
+from .agent_defs import standard_tools
 
 
 class OpenAI_Agent(BaseAgent):
@@ -43,8 +43,7 @@ class OpenAI_Agent(BaseAgent):
 
     """
 
-    def __init__(self, agent_name: str, agent_dir: str | None = None,
-                 agent_config: dict | None = None) -> None:
+    def __init__(self, agent_config: BaseAgent.AgentConfig = {}) -> None:
         """
         Initialize the OpenAI_Agent object.
 
@@ -59,70 +58,37 @@ class OpenAI_Agent(BaseAgent):
         Returns:
             None
         """
-        super().__init__()
         self.performance_factor = 1
+        agent_name = agent_config.get("name", "noname")
+        super().__init__(agent_name)
         self.logger.info(f"Initializing agent {agent_name}")
         self.name = agent_name
         self.threads = []
-        if agent_dir is None:
-            agent_dir = os.path.join(os.path.dirname(__file__), "agents")
+
+        self.config = self.AgentConfig(agent_config)
+
+        self.temperature = self.config.temperature
+        self.config.tools.extend(standard_tools)
+        self.config.tools.extend([{"type": "code_interpreter"},
+                                  {"type": "file_search"}])
+        chat_function_tools = [tool for tool in self.config.tools
+                               if tool['type'] == "function" and
+                               tool['function']['name'] ==
+                               "chat_with_other_agent"]
         try:
-            config_json = os.path.join(agent_dir, f"{agent_name}.json")
-            if agent_config is not None:
-                self.config = self.AgentConfig(agent_config)
-            else:
-                self.config = self.AgentConfig(json.load(open(config_json)))
-
-            feedbacks = []
-            try:
-                with open(os.path.join(agent_dir, agent_name + ".feedback.yaml"),
-                          'r', encoding="utf-8") as f:
-                    feedbacks = yaml.safe_load(f.read())
-            except:
-                pass
-
-            for feedback in feedbacks:
-                if hasattr(feedback, 'score'):
-                    self.performance_factor *= 1 + max(feedback['score'], 10) / 100
-
-            self.additional_instructions = str(
-                {fb['additional_instructions'] for fb in feedbacks
-                 if hasattr(fb, 'additional_instructions')})
-
-            self.temperature = self.config.temperature
-            self.config.tools.extend(standard_tools)
-            self.config.tools.extend([{"type": "code_interpreter"},
-                                      {"type": "file_search"}])
-            chat_function_tools = [tool for tool in self.config.tools
-                                   if tool['type'] == "function" and
-                                   tool['function']['name'] ==
-                                   "chat_with_other_agent"]
-            try:
-                if self.name in chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum']:
-                    chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum'].remove(
-                        self.name)
-            except KeyError as e:
-                self.logger.warning(
-                    f"<{self.name}> - chat_with_other_agent tools function does not have agent_name parameter. Please check: {e}")
-            except Exception as e:
-                self.logger.warning(
-                    f"<{self.name}> - error setting other_agent_list in chat_with_other_agent tools function. Please check: {e}")
-            if (config.USE_AZURE):
-                self.model = config.AZURE_OPENAI_DEPLOYMENT_NAME
-            else:
-                self.model = config.OPENAI_MODEL
-        except json.decoder.JSONDecodeError:
-            self.logger.fatal(
-                f"{agent_name}m.json file is not valid JSON. Please fix the pm.json file.")
-            exit()
-        except FileNotFoundError:
-            self.logger.fatal(
-                f"{agent_name}.json file not found. Please create a pm.json file in the current directory.")
-            exit()
-        except KeyError:
-            self.logger.fatal(
-                f"{agent_name}.json file does not contain an 'instruction' key. Please add an 'instruction' key to the pm.json file.")
-            exit()
+            if self.name in chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum']:
+                chat_function_tools[0]['function']['parameters']['properties']['agent_name']['enum'].remove(
+                    self.name)
+        except KeyError as e:
+            self.logger.warning(
+                f"<{self.name}> - chat_with_other_agent tools function does not have agent_name parameter. Please check: {e}")
+        except Exception as e:
+            self.logger.warning(
+                f"<{self.name}> - error setting other_agent_list in chat_with_other_agent tools function. Please check: {e}")
+        if (config.USE_AZURE):
+            self.model = config.AZURE_OPENAI_DEPLOYMENT_NAME
+        else:
+            self.model = config.OPENAI_MODEL
 
     def __enter__(self):
         """
@@ -147,7 +113,8 @@ class OpenAI_Agent(BaseAgent):
                     exit()
                 self.llm_client = OpenAI(api_key=config.OPENAI_API_KEY)
         except Exception as e:
-            self.logger.fatal(f"Failed to establish OpenAI client with error {e}.")
+            self.logger.fatal(
+                f"Failed to establish OpenAI client with error {e}.")
             exit()
 
         try:
@@ -171,7 +138,8 @@ class OpenAI_Agent(BaseAgent):
                 )
                 self.logger.debug(f"Created new assistant {self.name}")
 
-            self.thread = self.llm_client.beta.threads.create(metadata={"issue": "generic"})
+            self.thread = self.llm_client.beta.threads.create(
+                metadata={"issue": "generic"})
             self.threads.append(self.thread)
         except Exception as e:
             self.logger.fatal(
@@ -356,11 +324,13 @@ class OpenAI_Agent(BaseAgent):
         try:
             issue_no = str(context.get('issue', ''))
             sorted_threads = sorted(self.threads, key=lambda x: len(x.metadata.get('issue', ''))
-                                    - len(x.metadata.get('issue', '').removeprefix(issue_no)),
+                                    - len(x.metadata.get('issue',
+                                          '').removeprefix(issue_no)),
                                     reverse=True)
             thread = sorted_threads[0]
             if issue_no and thread.metadata.get('issue', '') == 'generic':
-                thread = self.llm_client.beta.threads.create(metadata={"issue": issue_no})
+                thread = self.llm_client.beta.threads.create(
+                    metadata={"issue": issue_no})
                 self.threads.append(thread)
 
             # making sure wait until other runs are no longer active before creating new one
@@ -583,7 +553,7 @@ class OpenAI_Agent(BaseAgent):
                     msg.id} -{role.capitalize()}: {content}")
                 result.insert(0, {'role': role, 'content': content})
                 if msg.id == current_message.id:
-                    #messages is last entry first, if we hit current_message which is the prompt, don't need to go further back.
+                    # messages is last entry first, if we hit current_message which is the prompt, don't need to go further back.
                     break
         else:
             self.logger.warning(f"OpenAI run returned status {
@@ -607,7 +577,8 @@ class OpenAI_Agent(BaseAgent):
         """
         self.logger.debug(
             f"<{self.name}> - evaluate_agent({agent_name},{score},{additional_instructions})")
-        other_agents = [a for a in BaseAgent.instances(True) if a.name == agent_name]
+        other_agents = [a for a in BaseAgent.instances(
+            True) if a.name == agent_name]
         if other_agents:
             the_other_agent = other_agents[0]
         else:
@@ -648,9 +619,11 @@ class OpenAI_Agent(BaseAgent):
         """
         self.logger.debug(
             f"<{self.name}> - chat_with_other_agent({agent_name},{message},{issue})")
-        the_other_agent = [a for a in BaseAgent.instances(True) if a.name == agent_name][0]
+        the_other_agent = [a for a in BaseAgent.instances(
+            True) if a.name == agent_name][0]
         if the_other_agent:
-            chat_result = the_other_agent.perform_task(message, self.name, {"issue": issue})
+            chat_result = the_other_agent.perform_task(
+                message, self.name, {"issue": issue})
             return f"{chat_result}."
         else:
             raise Exception(f"Agent {agent_name} not found")

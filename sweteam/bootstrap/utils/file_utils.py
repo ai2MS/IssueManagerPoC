@@ -3,7 +3,9 @@ import os
 import re
 import yaml
 from ..config import config
-from . import logger
+from .log import get_logger
+
+logger = get_logger(__package__ or __name__)
 
 
 def dir_tree(path_: str, return_yaml: bool = False) -> str:
@@ -96,7 +98,8 @@ def dir_tree(path_: str, return_yaml: bool = False) -> str:
             if any((os.path.join(root, fl).endswith(exclude_file) for exclude_file in exclude_files)):
                 continue
             cmt = extract_desc(os.path.join(root, fl))
-            d.setdefault(fl, {'type': "file", 'description': cmt, "size": os.path.getsize(os.path.join(root, fl))})
+            d.setdefault(fl, {'type': "file", 'description': cmt,
+                         "size": os.path.getsize(os.path.join(root, fl))})
             dir_list.append((os.path.join(root, fl), cmt))
         d = tree
     if return_yaml:
@@ -140,11 +143,13 @@ def dir_structure(path: str | dict = {}, action: str = 'read', *, actual_only: b
 
             with open(config.DIR_STRUCTURE_YAML, "r", encoding="utf-8") as f:
                 dir_structure_plan = yaml.safe_load(f.read())
-            current_dir_structure = yaml.safe_load(dir_tree(config.PROJECT_NAME, True))
+            current_dir_structure = yaml.safe_load(
+                dir_tree(config.PROJECT_NAME, True))
             combined_structure = {}
             for path_, item in walk_obj(current_dir_structure):
                 path_head, _, path_tail = path_.rpartition("/")
-                item_plan_value = get_grandchild(dir_structure_plan, path_head.replace('/contents', ''))
+                item_plan_value = get_grandchild(
+                    dir_structure_plan, path_head.replace('/contents', ''))
                 match path_tail:
                     case "description":
                         item_plan_value = (item if isinstance(item_plan_value, dict)
@@ -153,10 +158,11 @@ def dir_structure(path: str | dict = {}, action: str = 'read', *, actual_only: b
                         item_plan_value = ('directory' if isinstance(item_plan_value, dict)
                                            else "file") if item_plan_value else 'not planned'
                     case "size":
-                        #size has no plan values, so should always equal to actual value
+                        # size has no plan values, so should always equal to actual value
                         item_plan_value = item
                 if item == item_plan_value:
-                    get_grandchild(combined_structure, path_head)[path_tail] = item
+                    get_grandchild(combined_structure, path_head)[
+                        path_tail] = item
                 else:
                     get_grandchild(combined_structure, path_head)[path_tail] = {
                         'planned': item_plan_value, 'actual': item}
@@ -168,12 +174,14 @@ def dir_structure(path: str | dict = {}, action: str = 'read', *, actual_only: b
                     # if the path_ already exist in the combined result
                     pass
                 else:
-                    get_grandchild(combined_structure, path_w_contents)['planned'] = item
-                    get_grandchild(combined_structure, path_w_contents)['actual'] = 'not implemented'
+                    get_grandchild(combined_structure, path_w_contents)[
+                        'planned'] = item
+                    get_grandchild(combined_structure, path_w_contents)[
+                        'actual'] = 'not implemented'
             return yaml.dump(combined_structure, sort_keys=False)
 
         case "update":
-            #update plan for the dir_structure
+            # update plan for the dir_structure
             with open(config.DIR_STRUCTURE_YAML, "r", encoding="utf-8") as f:
                 dir_structure_plan = yaml.safe_load(f.read())
             if config.PROJECT_NAME in path:
@@ -185,17 +193,22 @@ def dir_structure(path: str | dict = {}, action: str = 'read', *, actual_only: b
                 path_head, _, path_tail = path_.rpartition("/")
                 match path_tail:
                     case "description":
-                        p_head, _, p_tail = path_.removesuffix("/description").rpartition("/")
-                        item_parent = get_grandchild(dir_structure_plan, p_head.replace('/contents', ''))
+                        p_head, _, p_tail = path_.removesuffix(
+                            "/description").rpartition("/")
+                        item_parent = get_grandchild(
+                            dir_structure_plan, p_head.replace('/contents', ''))
                         if isinstance(item_parent.setdefault(p_tail, {}), dict):
                             # p_head point to a dir
-                            item_parent[p_tail]["README.md"] = re.sub(r'(?i)^directory (of|for)\s*', '', item)
+                            item_parent[p_tail]["README.md"] = re.sub(
+                                r'(?i)^directory (of|for)\s*', '', item)
                         else:
                             # p_head point to a file
                             item_parent[p_tail] = item
                     case "type":
-                        p_head, _, p_tail = path_.removesuffix("/type").rpartition("/")
-                        item_parent = get_grandchild(dir_structure_plan, p_head.replace('/contents', ''))
+                        p_head, _, p_tail = path_.removesuffix(
+                            "/type").rpartition("/")
+                        item_parent = get_grandchild(
+                            dir_structure_plan, p_head.replace('/contents', ''))
                         if item == 'directory' or item == 'dir':
                             # path_head point to a dir
                             item_parent.setdefault("README.md", '')

@@ -2,7 +2,8 @@
 import json
 import os
 import sys
-from . import dir_structure, issue_manager, initialize_agent_files
+from . import dir_structure, issue_manager
+from .initialize_project import initialize_agent_files
 
 
 def test() -> None:
@@ -18,7 +19,8 @@ if __name__ == "__main__":
                 if os.path.exists(os.path.join(os.getcwd(), "agents")):
                     agent_parent_dir = os.getcwd()
                 else:
-                    agent_parent_dir = os.path.dirname(os.path.dirname(__file__))
+                    agent_parent_dir = os.path.dirname(
+                        os.path.dirname(__file__))
 
                 print("local run of util on " + agent_parent_dir)
 

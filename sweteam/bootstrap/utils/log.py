@@ -41,16 +41,19 @@ def get_logger(name: str, stream: str | bool = 'INFO', file: str | bool = '',
 
     log_file = log_file or f"{__file__[:-3]}.log"
     file_handler_class = logging.handlers.RotatingFileHandler
-    if file in LOG_LEVEL and (file_handler_class not in
-                              {h.__class__ for h in logger_.handlers}):
-        file_handler = file_handler_class(
-            log_file, maxBytes=10485760, backupCount=9, encoding='utf-8')
-        file_handler.setLevel(LOG_LEVEL[file])
-        f_format = logging.Formatter("%(asctime)s %(levelname)s - %(name)s "
-                                     "- %(filename)s:%(lineno)d  "
-                                     "%(module)s.%(funcName)s() - %(message)s")
-        file_handler.setFormatter(f_format)
-        logger_.addHandler(file_handler)
+    if file in LOG_LEVEL:
+        if (file_handler_class in {h.__class__ for h in logger_.handlers}):
+            logger_.warning("Setting logging-to-file to level %s but Logger %s already has a file handler,"
+                            " skipping...", file, name)
+        else:
+            file_handler = file_handler_class(
+                log_file, maxBytes=10485760, backupCount=9, encoding='utf-8')
+            file_handler.setLevel(LOG_LEVEL[file])
+            f_format = logging.Formatter("%(asctime)s %(levelname)s - %(name)s "
+                                        "- %(filename)s:%(lineno)d  "
+                                        "%(module)s.%(funcName)s() - %(message)s")
+            file_handler.setFormatter(f_format)
+            logger_.addHandler(file_handler)
 
     if not logger_.hasHandlers():
         logger_.addHandler(logging.NullHandler())

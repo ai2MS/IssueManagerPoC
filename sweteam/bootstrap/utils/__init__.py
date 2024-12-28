@@ -5,12 +5,14 @@ Usage:
     python -m utils [update_agent]
 """
 
+from .file_utils import dir_structure
 import os
 import subprocess
 import re
 import yaml
 import json
 from datetime import datetime
+from .initialize_project import initialize_package, initialize_Dockerfile, initialize_startup_script
 from .log import get_logger as plain_get_logger, logging
 from ..config import config
 
@@ -21,13 +23,15 @@ def get_logger(name: str = '', stream: str | bool | None = None, file: str | boo
     stream_level = config.LOG_LEVEL_CONSOLE if stream is None else stream
     file_level = config.LOG_LEVEL if file is None else file
     log_level = config.LOG_LEVEL if level is None else level
-    log_filename = ((config.PROJECT_NAME or os.path.basename(os.getcwd())) + ".log") if log_file is None else log_file
+    log_filename = ((config.PROJECT_NAME or os.path.basename(
+        os.getcwd())) + ".log") if log_file is None else log_file
 
     return plain_get_logger(logger_name, stream_level, file_level, log_file=log_filename, level=log_level)
 
 
 logger = get_logger((__package__ or __name__ or ""))
-from .file_utils import dir_structure
+logger.debug(
+    "utils logger initialized with the following handlers %s.", logger.handlers)
 
 
 def issue_manager(action: str, issue: str = '', only_in_state: list = [],
@@ -46,7 +50,7 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
             content_obj = json.loads(content.replace("\n", "\\n"))
         except Exception as e:
             logger.warning(
-                f"<issue_manager> - issue_manager {action} cannot parse content as json -{content}.")
+                "%s cannot parse content '%s' as JSON.", action, content)
             try:
                 yaml_obj = yaml.safe_load(content)
                 for k, v in yaml_obj.items():
@@ -58,8 +62,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                         else:
                             content_obj["details"] = [{k.lower(): v}]
             except Exception as e:
-                logger.warning(f"<issue_manager> - issue_manager {
-                    action} cannot parse content as yaml either -{content}... Will use it as str.")
+                logger.warning(
+                    "%s cannot parse content '%s' as YAML either... Will use it as str.", action, content)
                 if action == "create":
                     content_obj = {"title": f"{content:.24s}",
                                    "description": content}
@@ -77,7 +81,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
             results = []
             for root, dirs, files in os.walk(issue_dir):
                 for file in files:
-                    issue_number = root.removeprefix(config.ISSUE_BOARD_DIR + '/')
+                    issue_number = root.removeprefix(
+                        config.ISSUE_BOARD_DIR + '/')
                     if file == f"{issue_number.replace('/', '.')}.json":
                         file_path = os.path.join(root, file)
                         try:
@@ -122,7 +127,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                             results.append({'issue': issue_number, 'priority': priority, 'status': status,
                                            'assignee': assigned_to, 'title': data.get('title', "no title")})
                         except json.JSONDecodeError as e:
-                            logger.error("%s - could not list %s due to %s", action, issue, e, exc_info=e)
+                            logger.error(
+                                "%s - could not list %s due to %s", action, issue, e, exc_info=e)
                             results.append(
                                 {'issue': issue_number, 'status': f"Error Decoding Json"})
                         except FileNotFoundError as e:
@@ -154,7 +160,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                 if content_obj:
                     content_obj.setdefault('created_at', datetime.now().strftime(
                         "%Y-%m-%dT%H:%M:%S.%f"))
-                    last_update: dict = content_obj.setdefault('updates', [{}])[-1]
+                    last_update: dict = content_obj.setdefault(
+                        'updates', [{}])[-1]
                     last_update.setdefault('updated_by', caller)
                     last_update.setdefault('updated_at', datetime.now().strftime(
                         "%Y-%m-%dT%H:%M:%S.%f"))
@@ -171,7 +178,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                 new_issue_file = os.path.join(
                     new_issue_dir, f"{new_issue_number.replace('/', '.')}.json")
                 with open(new_issue_file, 'w') as ifh:
-                    logger.debug("%s issue %s, writing contents to %s", action, new_issue_number, new_issue_file)
+                    logger.debug("%s issue %s, writing contents to %s",
+                                 action, new_issue_number, new_issue_file)
                     json.dump(content_obj, ifh)
                 result = {"issue": new_issue_number, "status": "success",
                           "message": f"issue {new_issue_number} created successfully."}
@@ -202,7 +210,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
             except Exception as e:
                 logger.error("Cannot %s issue %s because %s", action,
                              issue, e, exc_info=e)
-                result = {"issue": issue, "status": "Error", "message": f"Cannot read issue {issue} because {e}"}
+                result = {"issue": issue, "status": "Error",
+                          "message": f"Cannot read issue {issue} because {e}"}
 
         case "update":
             if content_obj and "updated_at" not in content_obj:
@@ -234,11 +243,13 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
             except FileNotFoundError as e:
                 logger.error("%s issue %s failed due to error %s. issue_file=%s",
                              action, issue, e, issue_file, exc_info=e)
-                result = {"issue": issue, "status": f"Error, issue {issue} does not exist."}
+                result = {"issue": issue, "status": f"Error, issue {
+                    issue} does not exist."}
             except Exception as e:
                 logger.error("Cannot {action} issue %s because %s",
                              issue, e, exc_info=e)
-                result = {"issue": issue, "status": "Error", "message": f"Cannot update {issue} because {e}"}
+                result = {"issue": issue, "status": "Error",
+                          "message": f"Cannot update {issue} because {e}"}
 
         case "assign":
             issue_dir = os.path.join(config.ISSUE_BOARD_DIR, issue)
@@ -257,7 +268,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                 if "details" not in content_obj:
                     content_obj['details'] = f"assign {issue} to {assignee}."
                 if assignee:
-                    agents_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "agents")
+                    agents_dir = os.path.join(os.path.dirname(
+                        os.path.dirname(__file__)), "agents")
                     print(f"{agents_dir=}")
                     agents_list = [entry.removesuffix(".json") for entry in os.listdir(
                         agents_dir) if entry.endswith(".json")]
@@ -280,7 +292,8 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
             except FileNotFoundError as e:
                 logger.error("%s issue %s failed due to error %s. issue_file=%s",
                              action, issue, e, issue_file, exc_info=e)
-                result = {"issue": issue, "status": f"Error, issue {issue} does not exist."}
+                result = {"issue": issue, "status": f"Error, issue {
+                    issue} does not exist."}
             except Exception as e:
                 logger.error("%s issue %s failed due to error %s. issue_file=%s", action,
                              issue, e, issue_file, exc_info=e)
@@ -294,204 +307,6 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
 
     logger.debug("exiting %s %s - result: %s", action, issue, result)
     return result
-
-
-def initialize_package(package_dir: str | None = None) -> str:
-    """Initialize the __init__.py and __manin__.py files of a package.
-
-    Args:
-      package_dir: the path to the package, default is the namesake of the project
-
-    Returns:
-      the status of the package initializatio
-    """
-    if package_dir is None:
-        # the default package dir is a namesake of the project under the project_dir
-        package_dir = os.path.join(os.getcwd(), os.path.basename(os.getcwd()))
-    base_main = '''\
-"""Project base package.
-
-Example::
-    >>> print("Hello World!")
-    Hello World!
-"""
-def test() -> str:
-    import doctest
-    doctest.testmod()
-
-if __name__ == "__main__":
-    test()
-'''
-    try:
-        main_file_path = os.path.join(package_dir, "__main__.py")
-        with open(main_file_path, "w") as mf:
-            mf.write(base_main)
-    except Exception as e:
-        return f"<Init package> received Error: {e}"
-    else:
-        return f"<Init package> successful."
-
-
-def initialize_Dockerfile(project_name: str | None = None, dockerfile_path: str | None = None) -> str:
-    """Initialize the Dockerfile in the given directory
-    """
-    base_Dockerfile = f"""\
-# Use an official Python runtime as a parent image
-FROM python:3.12-slim
-
-# Set the working directory in the container
-WORKDIR /app
-
-# Install Poetry
-RUN pip install poetry
-
-# Copy pyproject.toml and poetry.lock files to the container
-COPY pyproject.toml poetry.lock ./
-
-# Install the project dependencies
-RUN poetry install --no-root
-
-# Copy the rest of the application code to the container
-COPY . .
-
-# Specify the command to run your application
-CMD ["poetry", "run", "python", "-m", "{project_name}"]
-"""
-    if project_name is None:
-        project_name = os.path.basename((os.getcwd()))
-    if dockerfile_path is None:
-        dockerfile_path = os.path.join(os.getcwd(), "Dockerfile")
-    base_Dockerfile.replace("{project_name}", project_name)
-    if os.path.exists(dockerfile_path):
-        result = (f"<init Dockerfile> {
-                  dockerfile_path} already exist, will not overwrite it, exiting...\n")
-    else:
-        try:
-            with open(dockerfile_path, "w") as df:
-                df.write(base_Dockerfile)
-        except Exception as e:
-            result = f"<init Dockerfile> got an Error: {e}\n"
-        else:
-            result = f"<init Dockerfile> {dockerfile_path} for {
-                project_name} has been successfully initialized.\n"
-    base_docker_compose = f"""\
-services:
-  {project_name}:
-    build: .
-    command: poetry run python -m {project_name}
-    ports:
-      - "${{SERVER_PORT:-8080}}:8080"
-    restart: always
-"""
-    docker_compose_path = os.path.join(os.path.dirname(
-        (dockerfile_path)), "docker-compose.yaml")
-    if os.path.exists(docker_compose_path):
-        result += (f"<init Dockerfile> {
-                   docker_compose_path} already exist, will not overwrite it, exiting...")
-    else:
-        try:
-            with open(docker_compose_path, "w") as df:
-                df.write(base_docker_compose)
-        except Exception as e:
-            result += f"<init Dockerfile> got an Error: {e}"
-        else:
-            result += f"<init Dockerfile> {docker_compose_path} for {
-                project_name} has been successfully initialized."
-    return result
-
-
-def initialize_startup_script(project_dir: str | None = None) -> str:
-    """Initialize the startup shell script
-    """
-    if project_dir is None:
-        project_dir = os.getcwd()
-    project_name = os.path.basename(project_dir)
-    script_path = os.path.join(project_dir, "run.sh")
-    base_script = f"""\
-#!/bin/bash
-
-# Function to display usage
-usage() {{
-    echo "Usage: $0 [-t test_name] [-k]"
-    exit 1
-}}
-
-# Parse command line options
-while getopts ":t:k" opt; do
-  case $opt in
-    t )
-      test_name=$OPTARG
-      ;;
-    k )
-      kill_docker=true
-      ;;
-    * )
-      usage
-      ;;
-  esac
-done
-
-# Check if both -t and -k are provided
-if [[ ! -z "$test_name" && ! -z "$kill_docker" ]]; then
-    echo "Error: -t and -k options cannot be used together."
-    usage
-fi
-
-# Execute the appropriate command based on the options
-if [ ! -z "$test_name" ]; then
-    echo "(re)starting docker compose"
-    docker-compose up -d
-    echo "Running python -m $test_name"
-    python -m "$test_name"
-elif [ ! -z "$kill_docker" ]; then
-    echo "Running docker-compose down"
-    docker-compose down
-else
-    docker-compose up -d
-    docker-compose logs
-fi
-"""
-    if os.path.exists(script_path):
-        return (f"<init startup script> {script_path} already exist, will not overwrite it, exiting...")
-    else:
-        try:
-            with open(script_path, "w") as df:
-                df.write(base_script)
-            current_permissions = os.stat(script_path).st_mode
-            os.chmod(script_path, current_permissions | 0o111)
-        except Exception as e:
-            return f"<init startup script> got an Error: {e}"
-        else:
-            return f"<init startup script> {script_path} for {project_name} has been successfully initialized."
-
-
-def initialize_agent_files(agent_parent_dir: str | None = None) -> str:
-    """Initialize the agent files
-    """
-    logger.debug(
-        f"<Initializing> - updating agents instructions as part of project setup. Should not be used in production")
-    import os
-    import json
-    from ..defs import new_instructions
-
-    agents_dir = os.path.join(
-        agent_parent_dir if agent_parent_dir else os.path.dirname(os.path.dirname(__file__)), "agents")
-    logger.info(f"updating agent info in {agents_dir=}")
-    agents_list = [entry.removesuffix(".json") for entry in os.listdir(
-        agents_dir) if entry.endswith(".json")]
-    for agent_name in agents_list:
-        config_json = os.path.join(agents_dir, f"{agent_name}.json")
-        if new_instructions.get(agent_name):
-            with open(config_json, "r") as f:
-                agent_config = json.load(f)
-
-            agent_config["instruction"] = new_instructions[agent_name] + \
-                new_instructions["all"]
-            with open(config_json, "w") as f:
-                json.dump(agent_config, f, indent=4)
-    logger.info(
-        f"<Initializing> - updated {len(agents_list)} agents instructions")
-    return 'done.'
 
 
 def execute_module(module_name: str, method_name: str | None = None, args: list = [], **kwargs) -> str:

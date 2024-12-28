@@ -10,43 +10,66 @@ Usage:
 """
 import contextlib
 from datetime import datetime
+import json
 import os
 import sys
 import shutil
 import subprocess
-from . import ollama_agent, utils, logging, logger
+import yaml
+
+from . import utils, logging, logger
 from .config import config
+from .defs import AgentFactory, BaseAgent
 from .utils.log import logging_context
 
 
 def load_agents():
-    from . import execassistant
-    ea = None
+    from .orchestrator import OllamaOrchestrator as Orchestrator
+    orchestrator: Orchestrator
     if __package__ and __package__.endswith("bootstrap"):
         print(f"Warning, Current package name: {__package__}")
     agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
     logger.debug(f"package name: {__package__}")
     agents_list = [entry.removesuffix(".json") for entry in os.listdir(
         agents_dir) if entry.endswith(".json")]
-    with execassistant.OllamaExecutiveAssistant() as ea:
+    with Orchestrator() as orchestrator:
         with contextlib.ExitStack() as stack:
             for agt in agents_list:
-                stack.enter_context(ollama_agent.Ollama_Agent(agt, agents_dir))
+                agt_cfg: BaseAgent.AgentConfig
+                try:
+                    agt_cfg = BaseAgent.AgentConfig(json.load(
+                        open(os.path.join(agents_dir, agt + ".json"))))
+                    logger.debug("loaded agent %s: %s", agt, agt_cfg)
+                except Exception as e:
+                    logger.error(
+                        "Error loading agent config %s: %s", agt, e, exc_info=e)
+                    continue
 
-            prompt = "Use issue_manager list issues with status in ['new', 'in progress'], and analyze them, prioritize, then continue work on them. Or, if no issues currently have new status, Start a new software project by asking the user to provide new requirements, and create a new issue for the new request, then assign the issue to the agent who is best to write the code (i.e. bigger project should be assigned to pm, simpler request should be assigned to developers)."
+                try:
+                    agt_feedback = yaml.safe_load(
+                        open(os.path.join(agents_dir, agt+".feedback.yaml")))
+                    logger.debug("loaded agent %s feedback: %s",
+                                 agt, agt_feedback)
+                except Exception as e:
+                    logger.error(
+                        "Error loading agent feedback %s: %s", agt, e, exc_info=e)
+                    agt_feedback = None
+                stack.enter_context(AgentFactory.create(
+                    agent_config=agt_cfg, previous_feedback=agt_feedback))
+
+            prompt = "Not Empty"
             round = 0
-            while prompt:
-                ea_reply = ea.perform_task(prompt, f"round:{round:04d}")
-                open_issues = ea.follow_up()
-                print(f"EA reply: {ea_reply}")
+            while prompt and (round := round + 1) < 5:
+                open_issues = orchestrator.follow_up()
                 if open_issues:
                     print(f"There are still open issues:{open_issues!r}")
                 else:
-                    print(f"no more open issues.")
-                prompt = input(
-                    "\n***Please follow up, or just press enter to finish this session:\n")
+                    print(f"No more open issues.")
+                prompt += input(
+                    "\n***What would you like the team to tackle next? (to exit, just press enter)\n:")
                 round += 1
-            logger.info(f"Exiting...")
+                response = orchestrator.perform_task(prompt, f"User Interaction #{round}")
+            logger.info(f"Exiting all agents...")
     logger.info(f"Exiting Done")
 
 
@@ -135,20 +158,21 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
                 overwrite = True
 
             if overwrite:
-                logger.debug(f"overwrite flag set to {overwrite}, copying bootstrap to {project_team_dir}")
-                init_agent_files = utils.initialize_agent_files()
+                logger.debug(f"overwrite flag set to {
+                             overwrite}, copying bootstrap to {project_team_dir}")
+                init_agent_files = utils.initialize_project.initialize_agent_files()
                 logger.debug(f"Initializing agent files returned "
                              f"{init_agent_files}")
                 copy_directory(current_dir, project_team_dir)
-                init_package_result = utils.initialize_package(
+                init_package_result = utils.initialize_project.initialize_package(
                     os.path.join(project_dir, os.path.basename(project_dir)))
                 logger.debug(f"Initializing package returned "
                              f"{init_package_result}")
-                init_Dockerfile_result = utils.initialize_Dockerfile(
+                init_Dockerfile_result = utils.initialize_project.initialize_Dockerfile(
                     project_name)
                 logger.debug(f"Initializing docker returned "
                              f"{init_Dockerfile_result}")
-                init_script_result = utils.initialize_startup_script()
+                init_script_result = utils.initialize_project.initialize_startup_script()
                 logger.debug(f"Initializing startup script returned "
                              f"{init_script_result}")
                 os.makedirs(os.path.dirname(
@@ -158,7 +182,8 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
                 logger.info(f"and project <{project_name}> is initialized "
                             "with bootstrap code.")
         except Exception as e:
-            logger.fatal("Error %s setting up project: %s", e, project_name, exc_info=e)
+            logger.fatal("Error %s setting up project: %s",
+                         e, project_name, exc_info=e)
             sys.exit(101)
 
         try:
@@ -266,7 +291,7 @@ if __name__ == "__main__":
                     if arg == "-p":
                         project_name = sys.argv[sys.argv.index(arg) + 1]
                     elif arg == "-o":
-                        overwrite = sys.argv[sys.argv.index(arg) + 1] == "True"
+                        overwrite = True
             except IndexError:
                 logger.fatal(f"Error parsing arguments.\nUsage:\npython -m {os.path.basename(
                     os.path.dirname(__file__))} [-p project_name] [-o True|False]\n")

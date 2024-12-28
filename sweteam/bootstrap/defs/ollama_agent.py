@@ -5,53 +5,25 @@ import yaml
 import ollama
 from datetime import datetime
 from typing import Sequence, Self
-from .config import config
-from .utils import issue_manager, dir_structure, execute_module, execute_command
-from .defs import standard_tools, BaseAgent
-from . import msg_logger
+from ..config import config
+from ..utils import issue_manager, dir_structure, execute_module, execute_command
+from .agent_defs import standard_tools
+from . import msg_logger, BaseAgent
 
 
 class Ollama_Agent(BaseAgent):
 
-    def __init__(self, agent_name: str, agent_dir: str | None = None, agent_config: dict = {}) -> None:
-        super().__init__(agent_name)
-        if agent_config:
-            #use agent_config
-            _agent_config = agent_config.copy()
-            _agent_config.setdefault("model", agent_config.get("model") or
+    def __init__(self, agent_config: BaseAgent.AgentConfig = {}) -> None:
+        # use agent_config
+        agent_config_dict = agent_config.to_dict()
+        agent_config_dict.setdefault("model", agent_config_dict.get("model") or
                                      config.OLLAMA_DEFAULT_BASE_MODEL or "mistral-nemo")
-            _agent_config.setdefault("name", agent_config.get("name", agent_name).replace(" ", "_"))
-            self.logger.debug("loaded agent %s config from parameter agent_config: %s as %s",
-                              agent_name, agent_config, _agent_config)
-            self.config = self.AgentConfig(_agent_config)
-        else:
-            #load {agent_name}.json from agent_dir
-            if agent_dir is None:
-                agent_dir = os.path.join(os.path.dirname(__file__), "agents")
-            config_json = os.path.join(agent_dir, f"{agent_name}.json")
-            try:
-                _agent_config = json.load(open(config_json))
-                self.logger.debug("loaded agent %s config from %s: %s", agent_name, config_json, _agent_config)
-                self.config = self.AgentConfig(_agent_config)
-            except Exception as e:
-                self.logger.error("Loading agent %s failed because of %s", agent_name, e, exc_info=e)
-
-            feedbacks = []
-            self.performance_factor = 1
-            try:
-                with open(os.path.join(agent_dir, agent_name + ".feedback.yaml"),
-                          'r', encoding="utf-8") as f:
-                    feedbacks = yaml.safe_load(f.read())
-            except:
-                pass
-
-            for feedback in feedbacks:
-                if hasattr(feedback, 'score'):
-                    self.performance_factor *= 1 + max(feedback['score'], 10) / 100
-
-            self.additional_instructions = str(
-                {fb['additional_instructions'] for fb in feedbacks
-                    if hasattr(fb, 'additional_instructions')})
+        agent_config_dict.setdefault("name", agent_config_dict.get(
+            "name", "noname").replace(" ", "_"))
+        super().__init__(agent_config_dict.get("name"))
+        self.config = self.AgentConfig(agent_config_dict)
+        self.logger.debug("loaded agent %s config from parameter agent_config: %s as %s",
+                          self.name, agent_config, self.config)
 
         self.llm_client = ollama.Client(host=config.OLLAMA_HOST)
 
@@ -83,7 +55,8 @@ class Ollama_Agent(BaseAgent):
                          f"SYSTEM {self.config.instruction!r}\n"
                          f"PARAMETER temperature {self.config.temperature}")
             self.logger.info("creating ollama model %s", modelfile)
-            response = self.llm_client.create(model=self.name, modelfile=modelfile)
+            response = self.llm_client.create(
+                model=self.name, modelfile=modelfile)
             self.logger.info("created ollama model received %s", response)
         self.model_initialized = True
 
@@ -116,13 +89,18 @@ class Ollama_Agent(BaseAgent):
         self.__enter__()
         self.messages.append({'role': 'user', 'content': task})
         if self.tools:
-            msg_logger.info("%s >> %s - %s (support tools)", from_, self.name, task)
-            self.logger.info("%s >> %s - %s (support tools)", from_, self.name, task)
-            response = self.llm_client.chat(model=self.name, messages=self.messages, tools=self.tools)
+            msg_logger.info("%s >> %s - %s (support tools)",
+                            from_, self.name, task)
+            self.logger.info("%s >> %s - %s (support tools)",
+                             from_, self.name, task)
+            response = self.llm_client.chat(
+                model=self.name, messages=self.messages, tools=self.tools)
         else:
             msg_logger.info("%s >> %s - %s (no tools)", from_, self.name, task)
-            self.logger.info("%s >> %s - %s (no tools)", from_, self.name, task)
-            response = self.llm_client.chat(model=self.name, messages=self.messages)
+            self.logger.info("%s >> %s - %s (no tools)",
+                             from_, self.name, task)
+            response = self.llm_client.chat(
+                model=self.name, messages=self.messages)
 
         # Add the model's response to the conversation history
         self.messages_append(response['message'])
@@ -141,10 +119,13 @@ class Ollama_Agent(BaseAgent):
                     try:
                         function_response = func(
                             **arguments) if func else f"Error {func_name} is configured as a tool but is not a method I have."
-                        self.logger.debug("calling <%s> returned: %s", func_name, function_response)
+                        self.logger.debug(
+                            "calling <%s> returned: %s", func_name, function_response)
                     except Exception as e:
-                        function_response = f"calling {func_name} failed with Error: {e!r}"
-                        self.logger.error("calling <%s(%s)> run into Error: %s", func_name, arguments, e, exc_info=e)
+                        function_response = f"calling {
+                            func_name} failed with Error: {e!r}"
+                        self.logger.error(
+                            "calling <%s(%s)> run into Error: %s", func_name, arguments, e, exc_info=e)
                     # Add function response to the conversation
                     self.messages_append(
                         {
@@ -152,7 +133,8 @@ class Ollama_Agent(BaseAgent):
                             'content': function_response,
                         }
                     )
-                    self.logger.debug("<%s> - tool %s returned: %s", self.name, func_name, function_response)
+                    self.logger.debug(
+                        "<%s> - tool %s returned: %s", self.name, func_name, function_response)
                 else:
                     self.messages_append(
                         {
@@ -161,8 +143,10 @@ class Ollama_Agent(BaseAgent):
                         }
                     )
                     # Second API call: Get final response from the model
-            final_response = self.llm_client.chat(model=self.name, messages=self.messages)
-            self.logger.debug(f"<{self.name}> - {final_response['message']['content']}")
+            final_response = self.llm_client.chat(
+                model=self.name, messages=self.messages)
+            self.logger.debug(
+                f"<{self.name}> - {final_response['message']['content']}")
 
             return str(final_response['message']['content'])
         else:
@@ -181,7 +165,8 @@ class Ollama_Agent(BaseAgent):
         """
         self.logger.debug(
             f"<{self.name}> - evaluate_agent({agent_name},{score},{additional_instructions})")
-        other_agents = [a for a in BaseAgent.instances(True) if a.name == agent_name]
+        other_agents = [a for a in BaseAgent.instances(
+            True) if a.name == agent_name]
         if other_agents:
             the_other_agent = other_agents[0]
         else:
@@ -222,9 +207,11 @@ class Ollama_Agent(BaseAgent):
         """
         self.logger.debug(
             f"<{self.name}> - chat_with_other_agent({agent_name},{message},{issue})")
-        the_other_agent = [a for a in BaseAgent.instances(True) if a.name == agent_name][0]
+        the_other_agent = [a for a in BaseAgent.instances(
+            True) if a.name == agent_name][0]
         if the_other_agent:
-            chat_result = the_other_agent.perform_task(message, self.name, {"issue": issue})
+            chat_result = the_other_agent.perform_task(
+                message, self.name, {"issue": issue})
             return f"{chat_result}."
         else:
             raise Exception(f"Agent {agent_name} not found")
@@ -264,7 +251,8 @@ def test():
                                                       }
                                                   }]
                                                   }) as test_agent:
-        test_agent.perform_task(input("what do you want to say to the test_agent:"))
+        test_agent.perform_task(
+            input("what do you want to say to the test_agent:"))
 
 
 if __name__ == "__main__":
