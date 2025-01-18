@@ -4,14 +4,43 @@ import json
 import yaml
 import ollama
 from datetime import datetime
-from typing import Sequence, Self
+from typing import Sequence, Self, List, Dict
 from ..config import config
 from ..utils import issue_manager, dir_structure, execute_module, execute_command
 from .agent_defs import standard_tools
 from . import msg_logger, BaseAgent
+from pydantic import BaseModel
+
+
 
 
 class Ollama_Agent(BaseAgent):
+    """
+    Ollama_Agent is a specialized agent that interacts with the Ollama LLM client.
+    
+    This agent is capable of performing tasks, evaluating other agents, and 
+    communicating with other agents. It supports the use of tools and maintains 
+    a conversation history. The agent can be initialized with a specific configuration 
+    and can manage its lifecycle using context management.
+
+    Attributes:
+        config (AgentConfig): Configuration for the agent.
+        llm_client (ollama.Client): The LLM client used for communication.
+        messages (list): The conversation history.
+        model_initialized (bool): Indicates if the model has been initialized.
+        tools (list): List of tools available to the agent.
+
+    Methods:
+        __enter__(): Initializes the agent model if not already initialized.
+        __exit__(exc_type, exc_val, exc_tb): Cleans up resources when the agent is no longer needed.
+        perform_task(task, from_, context): Performs a task and returns the result.
+        evaluate_agent(agent_name, score, additional_instructions): Evaluates the performance of another agent.
+        chat_with_other_agent(agent_name, message, issue): Communicates with another agent.
+    """
+    
+    class TaskResult(BaseModel):
+        response: str
+        tool_use: List[Dict[str, str]]
 
     def __init__(self, agent_config: BaseAgent.AgentConfig = {}) -> None:
         # use agent_config
@@ -85,9 +114,10 @@ class Ollama_Agent(BaseAgent):
 
     # method to list/read/write issues
 
-    def perform_task(self, task: str = '', from_: str = "Unknown", context: dict = {}) -> str:
+    def perform_task(self, task: str = '', from_: str = "Unknown", context: dict = {}) -> TaskResult:
         self.__enter__()
         self.messages.append({'role': 'user', 'content': task})
+        tool_use = []
         if self.tools:
             msg_logger.info("%s >> %s - %s (support tools)",
                             from_, self.name, task)
@@ -122,17 +152,21 @@ class Ollama_Agent(BaseAgent):
                         self.logger.debug(
                             "calling <%s> returned: %s", func_name, function_response)
                     except Exception as e:
-                        function_response = f"calling {
-                            func_name} failed with Error: {e!r}"
+                        function_response = f"calling {func_name} failed with Error: {e!r}"
                         self.logger.error(
                             "calling <%s(%s)> run into Error: %s", func_name, arguments, e, exc_info=e)
                     # Add function response to the conversation
                     self.messages_append(
                         {
                             'role': 'tool',
-                            'content': function_response,
+                            'content': repr(function_response),
                         }
                     )
+                    tool_use.append({
+                        "tool_type": "function",
+                        "tool_name": func_name,
+                        "tool_return": str(function_response)
+                    })
                     self.logger.debug(
                         "<%s> - tool %s returned: %s", self.name, func_name, function_response)
                 else:
@@ -148,11 +182,10 @@ class Ollama_Agent(BaseAgent):
             self.logger.debug(
                 f"<{self.name}> - {final_response['message']['content']}")
 
-            return str(final_response['message']['content'])
+            return self.TaskResult(response=str(final_response['message']['content']), tool_use=tool_use)
         else:
-            self.logger.debug(f"<{self.name}> The session didn't use tools. Its response was:{
-                              response['message']}")
-            return response['message']['content']
+            self.logger.debug(f"<{self.name}> The session didn't use tools. Its response was:{response['message']}")
+            return self.TaskResult(response=response['message']['content'], tool_use=tool_use)
 
     def evaluate_agent(self, agent_name: str, score: int = 0, additional_instructions: str = "") -> str:
         """Provide evaluation of the response by an agent
@@ -163,6 +196,7 @@ class Ollama_Agent(BaseAgent):
         Returns:
             status of the evaluation
         """
+        return "evaluation is temporarily disabled"
         self.logger.debug(
             f"<{self.name}> - evaluate_agent({agent_name},{score},{additional_instructions})")
         other_agents = [a for a in BaseAgent.instances(
@@ -212,7 +246,7 @@ class Ollama_Agent(BaseAgent):
         if the_other_agent:
             chat_result = the_other_agent.perform_task(
                 message, self.name, {"issue": issue})
-            return f"{chat_result}."
+            return f"{agent_name} replied: {chat_result.get('respons')}.  {chat_result.get('tool_use')!r}"
         else:
             raise Exception(f"Agent {agent_name} not found")
 

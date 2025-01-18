@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 import json
 import os
 import re
+
+from pydantic import BaseModel
 from ..utils import get_logger, issue_manager, dir_structure, execute_command, execute_module
 
 
@@ -98,8 +100,8 @@ class BaseAgent(ABC):
                 temp_instances.extend(cls._instances)
             return temp_instances
 
+ 
     # method to list/read/write issues
-
     def issue_manager(self, action: str, issue: str = '',
                       only_in_state: list = [], content: str = None,
                       assignee: str = None):

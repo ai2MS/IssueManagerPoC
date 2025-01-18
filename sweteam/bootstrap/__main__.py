@@ -46,29 +46,47 @@ def load_agents():
                     continue
 
                 try:
-                    agt_feedback = yaml.safe_load(
-                        open(os.path.join(agents_dir, agt+".feedback.yaml")))
-                    logger.debug("loaded agent %s feedback: %s",
-                                 agt, agt_feedback)
+                    feedback_file = os.path.join(agents_dir, agt+".feedback.yaml")
+                    if os.path.exists(feedback_file) and os.path.isfile(feedback_file):
+                        agt_feedback = yaml.safe_load(
+                            open(feedback_file))
+                        logger.debug("loaded agent %s feedback: %s",
+                                    agt, agt_feedback)
+                    else:
+                        agt_feedback = None
+                        logger.warning("No feedback file found for agent %s",agt)
                 except Exception as e:
-                    logger.error(
+                    logger.warning(
                         "Error loading agent feedback %s: %s", agt, e, exc_info=e)
                     agt_feedback = None
+
                 stack.enter_context(AgentFactory.create(
                     agent_config=agt_cfg, previous_feedback=agt_feedback))
 
-            prompt = "Not Empty"
-            round = 0
-            while prompt and (round := round + 1) < 5:
+            prompt = ""
+            while prompt.lower() not in ["exit", "quit", "end"]:
                 open_issues = orchestrator.follow_up()
                 if open_issues:
                     print(f"There are still open issues:{open_issues!r}")
+                    guidance = "User provided the following helpful inforamtion to the team:"
+                    guidance += "Please updated the relevant issue tickets accordingly. "
+                    prompt = input("Please provide additional instructions "
+                             "so that the team can continue working on these issues:")
                 else:
                     print(f"No more open issues.")
-                prompt += input(
-                    "\n***What would you like the team to tackle next? (to exit, just press enter)\n:")
-                round += 1
-                response = orchestrator.perform_task(prompt, f"User Interaction #{round}")
+                    guidance = "Please create a new issue for the following user input: "
+                    prompt = input(
+                        "\n***\nWhat would you like the team to tackle next? \n:")
+                    while not orchestrator.is_true("Is the user prompt look like a software development request", 
+                                               usr_prompt=prompt):
+                        prompt = input("I am programmed to handle software development requests only."
+                                       f"the previous instruction does not look like a software development request.\n"
+                                       "Please provide a new instruction for the team to work on:")               
+
+                response = orchestrator.perform_task(guidance + prompt, f"User Interaction")
+                if orchestrator.is_true("The user wants to exit and end the session", response):
+                    break
+
             logger.info(f"Exiting all agents...")
     logger.info(f"Exiting Done")
 
@@ -141,12 +159,14 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
                                      f"can't initialize it as {project_name}")
                         sys.exit(1)
                 else:
+                    src_item = os.path.join(os.path.dirname(current_parent_dir), "pyproject.toml")
+                    dst_item = os.path.join(project_dir, "pyproject.toml")
+                    shutil.copy2(src_item, dst_item)
                     poetry_init_result = subprocess.run(
                         ['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
                     poetry_init_result.check_returncode()
                     overwrite = True
-                    logger.info(f"New project <{project_name}> is initialized."
-                                )
+                    logger.info(f"New project <{project_name}> is initialized.")
             else:
                 poetry_new_result = subprocess.run(
                     ['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
@@ -156,6 +176,16 @@ def main(project_name: str = 'default_project', overwrite: bool = False) -> None
                     project_dir, "issue_board"))
                 os.chdir(project_dir)
                 overwrite = True
+            # make sure the project is initialized with poetry installed packages:
+            poetry_installed_packages = subprocess.run(
+                ['poetry', 'show', '--no-dev', '--tree'], capture_output=True, text=True)
+            poetry_installed_root_packages = [p for p in poetry_installed_packages.stdout.split("\n") 
+                                              if not (p.startswith("├─") or p.startswith("│") or 
+                                                      p.startswith("└") or p.startswith(" "))]
+            for root_package in [p for p in poetry_installed_root_packages if p]:
+                poetry_add_result = subprocess.run(
+                    ['poetry', 'add', "=^".join(root_package.split()[0:2])], capture_output=True, text=True)
+                poetry_add_result.check_returncode()
 
             if overwrite:
                 logger.debug(f"overwrite flag set to {
