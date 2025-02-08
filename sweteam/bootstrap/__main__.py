@@ -32,6 +32,7 @@ def main():
     logger.debug(f"package name: {__package__}")
     agents_list = [entry.removesuffix(".json") for entry in os.listdir(
         agents_dir) if entry.endswith(".json")]
+    agents = []
     with Orchestrator() as orchestrator:
         with contextlib.ExitStack() as stack:
             for agt in agents_list:
@@ -60,32 +61,11 @@ def main():
                         "Error loading agent feedback %s: %s", agt, e, exc_info=e)
                     agt_feedback = None
 
-                stack.enter_context(AgentFactory.create(
-                    agent_config=agt_cfg, previous_feedback=agt_feedback))
+                agents.append(stack.enter_context(AgentFactory.create(
+                    agent_config=agt_cfg, previous_feedback=agt_feedback)))
 
-            prompt = ""
-            while prompt.lower() not in ["exit", "quit", "end"]:
-                open_issues = orchestrator.follow_up()
-                if open_issues:
-                    print(f"There are still open issues:{open_issues!r}")
-                    guidance = "User provided the following helpful inforamtion to the team:"
-                    guidance += "Please updated the relevant issue tickets accordingly. "
-                    prompt = input("Please provide additional instructions "
-                             "so that the team can continue working on these issues:")
-                else:
-                    print(f"No more open issues.")
-                    guidance = "Please create a new issue for the following user input: "
-                    prompt = input(
-                        "\n***\nWhat would you like the team to tackle next? \n:")
-                    while not orchestrator.is_true("Is the user prompt look like a software development request", 
-                                               usr_prompt=prompt):
-                        prompt = input("I am programmed to handle software development requests only."
-                                       f"the previous instruction does not look like a software development request.\n"
-                                       "Please provide a new instruction for the team to work on:")               
+            orchestrator.orchestrate(agents)
 
-                response = orchestrator.perform_task(guidance + prompt, f"User Interaction")
-                if orchestrator.is_true("The user wants to exit and end the session", response):
-                    break
 
             logger.info(f"Exiting all agents...")
     logger.info(f"Exiting Done")

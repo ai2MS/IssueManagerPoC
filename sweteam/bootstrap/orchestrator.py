@@ -3,16 +3,11 @@ This is the agent to ensure every step follows software development process.
 The goal of this agent is not to innovate, rather, you check other agent's responses, and make sure they adhere to required process.
 """
 
-import contextlib
-from email import message
-import json
 from re import A
 from pydantic import BaseModel
-from . import logger
+from . import logger, config
 from .utils import issue_manager
-from .defs import BaseAgent, AgentFactory
-from .defs import ollama_agent, openai_agent
-from .defs.agent_defs import agent_roles
+from .defs import BaseAgent, ollama_agent, openai_agent
 
 
 class Orchestrator(BaseAgent):
@@ -25,29 +20,29 @@ class Orchestrator(BaseAgent):
     satisfactory, the orchestrator will ensure the issue ticket(s) are updated
     accordingly."""
 
-    def is_true(self, question: str, usr_prompt: str="", agt_response: str="") -> bool:
-        """Determine if the given response means certain thing is true.
+    class BinaryAnswer(BaseModel):
+        is_true: bool
+        confidence_percentage: float
+        exaplanation: str
+    def is_true(self, question: str, usr_prompt: str="", agt_response: str="") -> BinaryAnswer:
+        """
+        Determine if the given response means a certain thing is true.
 
-        Requries the LLM client to support structured response.
+        Requires the LLM client to support structured response.
 
         Args:
-            question (str): What need to be check as True or False.
+            question (str): The question to be checked as True or False.
             usr_prompt (str): The prompt the user used to ask the agent to perform.
             agt_response (str): The response from the agent.
 
         Returns:
             bool: Whether the answer to the question is True.
         """
-        # Review the response and update issue details
-        class Binary_Answer(BaseModel):
-            is_true: bool
-            confidence_percentage: float
-            exaplanation: str
 
         self.logger.debug("Checking if %s is True for user prompt: %s and agent response: %s",
                           question, usr_prompt, agt_response)
 
-        is_true_format = Binary_Answer.model_json_schema()
+        is_true_format = self.BinaryAnswer.model_json_schema()
         is_true_instruction = ("With the above message history, "
             f"Using structured format, answer if '{question}' is True or False, "
             f"from 0 to 100, how confident is your answer, and explain why.\n")
@@ -69,26 +64,39 @@ class Orchestrator(BaseAgent):
                 'temperature': self.config.temperature}
         )
         if hasattr(is_true_response, 'message') and hasattr(is_true_response.message, 'content'):
-            structrued_is_true_response = Binary_Answer.model_validate_json(is_true_response.message.content)
+            structrued_is_true_response = self.BinaryAnswer.model_validate_json(is_true_response.message.content)
         else:
-            structrued_is_true_response = Binary_Answer(is_true=False, confidence_level=0.0, 
+            structrued_is_true_response = self.BinaryAnswer(is_true=False, confidence_level=0.0, 
                                                         exaplanation="No response from LLM.")
 
         self.logger.debug("answer to the question: %r", structrued_is_true_response)
 
-        return structrued_is_true_response.is_true
+        return structrued_is_true_response
 
-    def to_structured_answer(self, question: str="", usr_prompt: str="", agt_response: str="") -> str:
-        """Convert the response from the agent to a structured answer.
+    class DistilledAnswer(BaseModel):
+        answer: str
+        explanation: str
+        
+    def distill(self, question: str="", usr_prompt: str="", agt_response: str="") -> DistilledAnswer:
         """
-        class Structured_Answer(BaseModel):
-            answer: str
-            explanation: str
+        Convert the agent's response into a structured answer format.
+
+        This function takes a question, the user's prompt, and the agent's response, and extracts a concise answer
+        to the question from the agent's response. The answer is provided in a structured format with an explanation.
+
+        Args:
+            question (str): The question to be answered. Defaults to an empty string.
+            usr_prompt (str): The user's prompt. Defaults to an empty string.
+            agt_response (str): The agent's response. Defaults to an empty string.
+
+        Returns:
+            DistilledAnswer: An object containing the structured answer and an explanation.
+        """
         
         self.logger.debug("Converting response to structured answer from agent..."
                             "Response: %s", agt_response)
         
-        structured_answer_format = Structured_Answer.model_json_schema()
+        structured_answer_format = self.Distilled_Answer.model_json_schema()
         structured_answer_instruction = (f"Extract the concise answer to the question '{question}' from the user "
                                          "prompt and agent response. Provide the answer in a structured format with an explanation.\n")
         
@@ -107,23 +115,37 @@ class Orchestrator(BaseAgent):
         )
 
         if hasattr(structured_answer_response, 'message') and hasattr(structured_answer_response.message, 'content'):
-            structured_answer = Structured_Answer.model_validate_json(structured_answer_response.message.content)
+            structured_answer = self.DistilledAnswer.model_validate_json(structured_answer_response.message.content)
         else:
-            structured_answer = Structured_Answer(answer="", explanation="No response from LLM.")
+            structured_answer = self.DistilledAnswer(answer="", explanation="No response from LLM.")
 
         self.logger.debug("Structured answer: %r", structured_answer)
 
-        return (structured_answer.answer, structured_answer.explanation)
+        return structured_answer
 
-    def break_down(self, usr_prompt: str="", agt_response: str="") -> list:
-        class BreakdownResponse(BaseModel):
-            steps: list
-            explanation: str
+    class BreakdownAnswer(BaseModel):
+        steps: list
+        explanation: str
+    def break_down(self, usr_prompt: str="", agt_response: str="") -> BreakdownAnswer:
+        """
+        Break down the agent's response into a structured format.
+
+        This function takes the user's prompt and the agent's response, and transforms the agent's response
+        into a structured format consisting of a list of steps and an explanation.
+
+        Args:
+            usr_prompt (str): The user's prompt. Defaults to an empty string.
+            agt_response (str): The agent's response. Defaults to an empty string.
+
+        Returns:
+            BreakdownAnswer: An object containing the structured breakdown of the agent's response, 
+                            including a list of steps and an explanation.
+        """
 
         self.logger.debug("Breaking down response from agent..."
                           "Response: %s", agt_response)
 
-        response_breakdown_format = BreakdownResponse.model_json_schema()
+        response_breakdown_format = self.BreakdownAnswer.model_json_schema()
         response_breakdown_instruction = (f"The assistant agent's response provided the following response, "
                 f"please transform the response into a structured format of a list of steps: {agt_response}\n")
         breakdown_response = self.llm_client.chat(
@@ -137,14 +159,17 @@ class Orchestrator(BaseAgent):
             options={
             'temperature': self.config.temperature}
         )
-        structured_breakdown_response = BreakdownResponse.model_validate_json(breakdown_response.message.content)
+        structured_breakdown_response = self.BreakdownAnswer.model_validate_json(breakdown_response.message.content)
 
         self.logger.debug("Structured breakdown response: %s", structured_breakdown_response.steps)
         self.logger.debug("Structured breakdown Explanation: %s", structured_breakdown_response.explanation)
 
-        return structured_breakdown_response.steps
+        return structured_breakdown_response
 
-    def review_response(self, to_agt_prompt, agt_response: str, issue: dict) -> dict:
+    class ResponseEvaluation(BaseModel):
+        score: float
+        explanation: str
+    def evalate_response(self, to_agt_prompt, agt_response: str, issue: dict) -> ResponseEvaluation:
         """Review the response from an agent and update the issue details accordingly.
 
         Args:
@@ -153,19 +178,14 @@ class Orchestrator(BaseAgent):
             issue (dict): The issue details.
 
         Returns:
-            dict: The updated issue details.
+            ResponseEvaluation: The updated issue details.
         """
-        # Review the response and update issue details
-        class Response_Review(BaseModel):
-            response_score: float
-            is_response_satisfactory: bool
-            comment: str
 
-        response_review_format = Response_Review.model_json_schema()
-        response_review_instruction = ("The user asked the assistant to respond to the given prompt request "
-                                        "and the assistant provided the subsequent response. Please evaluate how well is the "
-                                        "response from the assistant addressed the user request. is the response satifactory? "
-                                        "With a scale of 0 to 10, how do you score the response? ")
+        response_review_format = self.ResponseEvaluation.model_json_schema()
+        response_review_instruction = ("Based on the provided user prompt and assistant response, "
+                                        "How well did the assistant address the user request? "
+                                        "Where a score of 0 means completely failure and a score of 10 means extremely well. "
+                                        "Provide an explain the score.\n")
         review_response = self.llm_client.chat(
             model=self.config.model,
             messages=[
@@ -178,7 +198,10 @@ class Orchestrator(BaseAgent):
             options={
                 'temperature': self.config.temperature}
         )
-        structrued_review_response = Response_Review.model_validate_json(review_response.message.content)
+        if hasattr(review_response, 'message') and hasattr(review_response.message, 'content'):
+            structrued_review_response = self.ResponseEvaluation.model_validate_json(review_response.message.content)
+        else:
+            structrued_review_response = self.ResponseEvaluation.model_validate_json({"score": -1, "explanation": "evaluation failed to return a response."})
 
         self.logger.debug("Reviewing response from agent...")
         self.logger.debug("Response: %s", agt_response)
@@ -186,7 +209,7 @@ class Orchestrator(BaseAgent):
 
         return structrued_review_response
 
-    def follow_up(self, agent_names: list = [], issue_number: str = '') -> list:
+    def orchestrate(self, agent_names: list = []) -> None:
         """
         Follow up on open issues and assign them to appropriate agents.
 
@@ -195,13 +218,13 @@ class Orchestrator(BaseAgent):
         It also evaluates agent responses and updates issue details accordingly.
 
         Args:
-            agent_names (list): List of agent names to filter issues by assignee. 
+            agents (list): List of agents to filter issues by assignee. 
                                 If empty, all open issues are considered.
             issue_number (str): Specific issue number to filter open issues. 
                                 If empty, all open issues are considered.
 
         Returns:
-            list: A list of dictionaries representing the open issues.
+            None
         """
         def get_open_issues(issue_number: str = '') -> list[dict]:
             self.logger.debug(".get_open_issues(%s)...", issue_number)
@@ -216,85 +239,91 @@ class Orchestrator(BaseAgent):
 
             return open_issues if isinstance(open_issues, list) else [open_issues]
 
-        retry_count = 5
-        while (open_issues := get_open_issues()) and (retry_count := retry_count - 1) > 0:
+        agents: list[BaseAgent] = BaseAgent.instances(True)
+        agent_roles = []
+        for agt in agents:
+            agent_roles.append((agt.name, self.distill("What is the role of the agent?", "", 
+                                                       agt.config.instruction).answer))
+
+        retry_count = config.RETRY_COUNT
+        while (retry_count := retry_count - 1) > 0:
+            open_issues = (get_open_issues() or 
+                           [issue_manager("create", input("No open issues. What would you like the team to tackle next: \n"))])
+            
             open_issues.sort(key=lambda x: [x.get("priority", "5"), tuple(
                 map(int, x.get("issue", "").split("/")))])
             for open_issue in open_issues:
+                issue_number = open_issue.get("issue")
                 if not open_issue.get("assignee") or self.name in open_issue.get("assignee", ""):
                     # if not assigned or assigned to myself, try assign it
-                    to_self_prompt = f"Issue {open_issue.get('issue')} is assigned to {
-                        open_issue.get("assignee", "No One")}, "
-                    "please use issue_manager to read the content of it, and determine who should be responsible for continue working on this issue, "
-                    "and then use issue_manager(action='assign'...) to assign this issue to the agent according the below rols. "
-                    to_self_prompt += agent_roles
+                    to_self_prompt = f"Issue {issue_number} is assigned to \
+                                       {open_issue.get("assignee", "No One")}, please \
+                                        review the details of this issue using issue_manager and \
+                                        determine which agent should be responsible for this issue. \
+                                        using the below roles descriptions, then use the issue_manager \
+                                        assign command to assign the issue to the agent.\nagent roles: {agent_roles}"
                     o_reply = self.perform_task(
-                        to_self_prompt, "self(orchestrator)", {'issue': open_issue})
-                    if (updated_open_issues := get_open_issues(
-                            open_issue.get('issue', ""))):
+                        to_self_prompt, f"self({self.name})", {'issue': open_issue})
+                    
+                    if (updated_open_issues := get_open_issues(issue_number)):
                         open_issue = updated_open_issues[0]
-                        self.logger.info("Issue %s is now assigned to %s", open_issue.get(
-                            'issue'), open_issue.get('assignee'))
-
-                if not agent_names or open_issue.get('assignee') in agent_names:
-                    # if no specific agent names or the issue is assigned to one of the specified agents
-                    agents: list[BaseAgent] = BaseAgent.instances(True)
-                    for agt in [ a for a in agents if a.name == open_issue.get('assignee')]:
-                        to_agt_prompt = f"\nIssue {open_issue.get('issue')} is assigned to you "
-                        f"and is in {open_issue.get('status')} status, it is about {open_issue.get('title')}. "
-                        "Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, "
-                        f"If you feel it is not clear and specific enough please analyze how to describe it in more details and create more specific sub issues for coding."
-                        agt_reply = agt.perform_task(
-                            to_agt_prompt, "Orchestrator", {"issue": open_issue})
-                        
-                        # Review the response
-                        review_response = self.review_response(to_agt_prompt,
-                            agt_reply, open_issue)
-                        self.logger.debug("Review response: %s", review_response)
-                        # should update feedback file here
-
-                        # check if the status of the issue is updated
+                        self.logger.info("Issue %s is now assigned to %s", issue_number, open_issue.get('assignee'))
 
 
-                        # check if the response include code snipets, if so save them to files
+                for agt in [ a for a in agents if a.name == open_issue.get('assignee')]:
+                    to_agt_prompt = f"\nIssue {issue_number} is assigned to you "
+                    f"and is in {open_issue.get('status')} status, it is about {open_issue.get('title')}. "
+                    "Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, "
+                    f"If you feel it is not clear and specific enough please analyze how to describe it in more details and create more specific sub issues for coding."
+                    agt_reply = agt.perform_task(
+                        to_agt_prompt, self.name, {"issue": open_issue})
+                    
+                    # Review the response
+                    response_evaluation = self.evalate_response(to_agt_prompt,
+                        agt_reply, open_issue)
+                    self.logger.debug("Review response: %s", response_evaluation)
+                    # was the response satisfactory? does it need to be re-done?
+                    # should update feedback file here?
 
-                        # check if the response include update that should be recorded in the issues 
+                    # check if the status of the issue is updated
+                    # If not, update the issue using the issue_manager tool
 
-                        # check the stage of the issue, 
+                    # check if the response include code snipets, if so save them to files
 
-                        ## if stage is "plan", review if the issue is detailed enough to start coding, 
-                        ## if stage is "coding", run the code of the updated file to check if it is working
-                        ## if stage is "testing", run the main.py to check if the integration is working
-                        ## if stage is "deploy", run the docker-compose to check if the code can be deployed properly
+                    # check the stage of the issue, 
+                    ## if stage is "plan", review if the issue is detailed enough to start coding, and break it down to steps and sub-issues
+                    ## if stage is "coding", run the code of the updated file to check if it is working
+                    ## if stage is "testing", run the main.py to check if the integration is working
+                    ## if stage is "deploy", run the docker-compose to check if the code can be deployed properly
 
-                        test_result = self.execute_command(
-                            "bash", ["run.sh"])
-                        to_self_prompt = (f"regarding issue {open_issue.get('issue')}, {agt.name} had responded with \"{agt_reply}\". And the current run.sh result is {test_result}."
-                                            f"Use your file_search tool to check if the information provided in this reply exist in the issue files in your issues vector_store?"
-                                            f"If not please use issue_manager() tool to update relevant issue or create sub issues under the most relevant issue."
-                                            )
-                        o_reply = self.perform_task(to_self_prompt, f"Orchestrator check if "
-                                                    f"{agt.name} complete issue.", {"issue": open_issue.get('issue', 'generic')})
-                        logger.debug(
-                            f"<{self.name}> - Orchestrator self perform task update issue result:{o_reply}")
+                    test_result = self.execute_command(
+                        "bash", ["run.sh"])
+                    to_self_prompt = (f"regarding issue {open_issue.get('issue')}, {agt.name} had responded with \"{agt_reply}\". And the current run.sh result is {test_result}."
+                                        f"Use your file_search tool to check if the information provided in this reply exist in the issue files in your issues vector_store?"
+                                        f"If not please use issue_manager() tool to update relevant issue or create sub issues under the most relevant issue."
+                                        )
+                    o_reply = self.perform_task(to_self_prompt, f"Orchestrator check if "
+                                                f"{agt.name} complete issue.", {"issue": open_issue.get('issue', 'generic')})
+                    logger.debug(
+                        f"<{self.name}> - Orchestrator self perform task update issue result:{o_reply}")
 
-                        to_self_prompt = (f"Please use evaluate_agent() tool to evaluate {agt.name}'s response, consider evaluation criteria {agt.config.evaluation_criteria}."
-                                            f"If the score is unsatisfactory, please provide additional_instructions argument, it will be used next time the agent is asked to perform a task."
-                                            )
-                        o_reply = self.perform_task(to_self_prompt, f"Orchestrator update "
-                                                    f"{agt.name} additional instructions", {"issue": open_issue})
+                    to_self_prompt = (f"Please use evaluate_agent() tool to evaluate {agt.name}'s response, consider evaluation criteria {agt.config.evaluation_criteria}."
+                                        f"If the score is unsatisfactory, please provide additional_instructions argument, it will be used next time the agent is asked to perform a task."
+                                        )
+                    o_reply = self.perform_task(to_self_prompt, f"Orchestrator update "
+                                                f"{agt.name} additional instructions", {"issue": open_issue})
 
-                        logger.debug(
-                            f"<{self.name}> - Orchestrator self perform task update additional instructions result:{o_reply}")
-                        break
-                    else:
-                        logger.warning(
-                            f"<{self.name}> - No agent found with name {open_issue.get('assignee')}")
-                        to_self_prompt = f"Issue {open_issue.get(
-                            'issue')} is not yet assigned to a worker agent, analyze it's description and details, and assign it to the best agent to tackle its current status."
-                        o_reply = self.perform_task(
-                            to_self_prompt, f"analyze issue {open_issue}", {"issue": open_issue})
-                    # self.upload_issues_as_vector_store()
+                    logger.debug(
+                        f"<{self.name}> - Orchestrator self perform task update additional instructions result:{o_reply}")
+                    break
+                else:
+                    logger.warning(
+                        f"<{self.name}> - No agent found with name {open_issue.get('assignee')}")
+                    to_self_prompt = f"Issue {open_issue.get(
+                        'issue')} is not yet assigned to a worker agent, analyze it's description and details, and assign it to the best agent to tackle its current status."
+                    o_reply = self.perform_task(
+                        to_self_prompt, f"analyze issue {open_issue}", {"issue": open_issue})
+                # self.upload_issues_as_vector_store()
 
         return get_open_issues()
         # print("***************")

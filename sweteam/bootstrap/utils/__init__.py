@@ -8,7 +8,7 @@ Usage:
 from .file_utils import dir_structure
 import os
 import subprocess
-import re
+from enum import Enum
 import yaml
 import json
 from datetime import datetime
@@ -33,6 +33,14 @@ logger = get_logger((__package__ or __name__ or ""))
 logger.debug(
     "utils logger initialized with the following handlers %s.", logger.handlers)
 
+
+class Action(Enum):
+    """Action Enum for the agent to take."""
+    LIST = "list"
+    CREATE = "create"
+    READ = "read"
+    UPDATE = "update"
+    ASSIGN = "assign"
 
 def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                   content: str | None = None, assignee: str | None = None, caller: str = "manually") -> dict | list:
