@@ -78,7 +78,7 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
     This function performs the following tasks:
     1. Creates a new project directory with the specified name
     2. Initializes a new git branch for the project
-    3. Sets up Poetry project configuration
+    3. Sets up uv project configuration
     4. Copies bootstrap code and agent files
     5. Initializes Docker configuration
     6. Sets up project structure and startup scripts
@@ -95,7 +95,7 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
     Raises:
         FileExistsError: If project directory exists and overwrite is False
         FileNotFoundError: If git is not installed on the system
-        subprocess.CalledProcessError: If Poetry or git commands fail
+        subprocess.CalledProcessError: If uv or git commands fail
         Exception: For other initialization errors
     """
     EMBEDDED_DEV_TEAM_NAME = "embedded_dev_team"
@@ -133,48 +133,53 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
                             "Can't continue.")
             exit(1)
 
-        if os.path.exists(project_dir):
-            os.chdir(project_dir)
-            if os.path.exists(os.path.join(project_dir, "pyproject.toml")):
-                poetry_version_result = subprocess.run(
-                    ['poetry', 'version'], capture_output=True, text=True)
-                poetry_version_result.check_returncode()
-                if poetry_version_result.stdout.split()[0] == project_name.replace("_", "-"):
-                    logger.warning(
-                        f"Project <{project_name}> has already been previously initialized.")
-                else:
-                    logger.error("Directory %s already contain a project that is called %s, "
-                                 "can't initialize it as %s",
-                                    project_dir, poetry_version_result.stdout.split()[0], project_name)
-                    sys.exit(1)
-            else:
-                src_item = os.path.join(os.path.dirname(current_parent_dir), "pyproject.toml")
-                dst_item = os.path.join(project_dir, "pyproject.toml")
-                shutil.copy2(src_item, dst_item)
-                poetry_init_result = subprocess.run(
-                    ['poetry', 'init', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
-                poetry_init_result.check_returncode()
-                overwrite = True
-                logger.info(f"New project <{project_name}> is initialized.")
-        else:
-            poetry_new_result = subprocess.run(
-                ['poetry', 'new', '--name', project_name, '--no-interaction', project_name], capture_output=True, text=True)
-            poetry_new_result.check_returncode()
-            logger.info(f"New project <{project_name}> is created.")
-            copy_directory(os.path.join(current_parent_dir, "issue_board"), os.path.join(
-                project_dir, "issue_board"))
-            os.chdir(project_dir)
+        if not os.path.exists(project_dir):
+            os.makedirs(project_dir, exist_ok=True)
+            copy_directory(os.path.join(current_parent_dir, "issue_board"), os.path.join(project_dir, "issue_board"))
+            logger.info(f"New project dir <{project_dir}> is created.")
             overwrite = True
+        os.chdir(project_dir)
+        if os.path.exists("pyproject.toml"):
+            import tomllib
+            with open("pyproject.toml", "r") as f:
+                project_toml = tomllib.loads(f.read())
+
+            try:
+                toml_project_name = project_toml["project"]["name"]
+            except KeyError:
+                toml_project_name = None
+            if toml_project_name == project_name.replace("_", "-"):
+                logger.warning(
+                    f"Project <{project_name}> has already been previously initialized.")
+            else:
+                logger.error("Directory %s already contain a project that is called %s, "
+                                "can't initialize it as %s",
+                                project_dir, toml_project_name, project_name)
+                sys.exit(1)
+        else:
+            src_item = os.path.join(os.path.dirname(current_parent_dir), "pyproject.toml")
+            dst_item = os.path.join("pyproject.toml")
+            shutil.copy2(src_item, dst_item)
+            uv_init_result = subprocess.run(
+                ['uv', 'init', '--name', project_name, '--app'], capture_output=True, text=True)
+            uv_init_result.check_returncode()
+            overwrite = True
+            logger.info(f"New project <{project_name}> is initialized.")
+
         # make sure the project is initialized with poetry installed packages:
-        poetry_installed_packages = subprocess.run(
-            ['poetry', 'show', '--no-dev', '--tree'], capture_output=True, text=True)
-        poetry_installed_root_packages = [p for p in poetry_installed_packages.stdout.split("\n") 
-                                            if not (p.startswith("├─") or p.startswith("│") or 
-                                                    p.startswith("└") or p.startswith(" "))]
-        for root_package in [p for p in poetry_installed_root_packages if p]:
-            poetry_add_result = subprocess.run(
-                ['poetry', 'add', "=^".join(root_package.split()[0:2])], capture_output=True, text=True)
-            poetry_add_result.check_returncode()
+        uv_installed_packages = subprocess.run(
+            ['uv', 'tree', '-d', '1'], capture_output=True, text=True)
+        uv_installed_root_packages = [p for p in uv_installed_packages.stdout.split("\n") 
+                                            if (p.startswith("├─") or p.startswith("└") )]
+        for root_package in uv_installed_root_packages:
+            if root_package[3:4] == ["(group:"]:
+                uv_add_result = subprocess.run(
+                    ['uv', 'add', "=^".join(root_package.split()[1:3]), f"--group={root_package[4].rstrip(')')}"]
+                    , capture_output=True, text=True)
+            else:
+                uv_add_result = subprocess.run(
+                    ['uv', 'add', ">=".join(root_package.split()[1:3])], capture_output=True, text=True)
+            uv_add_result.check_returncode()
 
         if overwrite:
             logger.debug(f"overwrite flag set to {
@@ -211,14 +216,14 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
         # sys.path.insert(0, project_dir)
         # actual_project_team = importlib.import_module(project_name+"."+EMBEDDED_DEV_TEAM_NAME)
         # actual_project_team.load_agents()
-        poetry_result = subprocess.run(
-            ['poetry', 'install'], capture_output=True, text=True)
-        poetry_result.check_returncode()
+        uv_result = subprocess.run(
+            ['uv', 'sync'], capture_output=True, text=True)
+        uv_result.check_returncode()
         logger.info(f"Project <{project_name}> is initialized with "
                     f"bootstrap code. Transferring execution to project"
                     f" <{project_name}>")
-        poetry_result = subprocess.run(
-            ['poetry', 'run', 'python', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name, "-C", project_dir], check=True)
+        uv_result = subprocess.run(
+            ['uv', 'run', '-m', EMBEDDED_DEV_TEAM_NAME, "-p", project_name, "-C", project_dir], check=True)
     except Exception as e:
         logger.error(f"{project_name} agents run into errors "
                         f"{e}. stack: {str(e)}")
