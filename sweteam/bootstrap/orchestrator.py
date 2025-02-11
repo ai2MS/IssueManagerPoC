@@ -96,7 +96,7 @@ class Orchestrator(BaseAgent):
         self.logger.debug("Converting response to structured answer from agent..."
                             "Response: %s", agt_response)
         
-        structured_answer_format = self.Distilled_Answer.model_json_schema()
+        structured_answer_format = self.DistilledAnswer.model_json_schema()
         structured_answer_instruction = (f"Extract the concise answer to the question '{question}' from the user "
                                          "prompt and agent response. Provide the answer in a structured format with an explanation.\n")
         

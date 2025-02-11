@@ -98,7 +98,7 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
         subprocess.CalledProcessError: If uv or git commands fail
         Exception: For other initialization errors
     """
-    EMBEDDED_DEV_TEAM_NAME = "embedded_dev_team"
+    EMBEDDED_DEV_TEAM_NAME = "dev_agents"
     new_branch_name = ''
     try:
         current_file = os.path.realpath(__file__)
@@ -168,7 +168,7 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
 
         # make sure the project is initialized with poetry installed packages:
         uv_installed_packages = subprocess.run(
-            ['uv', 'tree', '-d', '1'], capture_output=True, text=True)
+            ['uv', 'tree', '-d', '1', '--package', 'sweteam'], capture_output=True, text=True)
         uv_installed_root_packages = [p for p in uv_installed_packages.stdout.split("\n") 
                                             if (p.startswith("├─") or p.startswith("└") )]
         for root_package in uv_installed_root_packages:

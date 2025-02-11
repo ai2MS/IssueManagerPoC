@@ -85,7 +85,10 @@ class Ollama_Agent(BaseAgent):
                          f"PARAMETER temperature {self.config.temperature}")
             self.logger.info("creating ollama model %s", modelfile)
             response = self.llm_client.create(
-                model=self.name, modelfile=modelfile)
+                model=self.name, 
+                from_=self.config.model, system=self.config.instruction, 
+                parameters={"temperature": self.config.temperature},
+                stream=False)
             self.logger.info("created ollama model received %s", response)
         self.model_initialized = True
 
