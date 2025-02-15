@@ -11,7 +11,7 @@ class BaseAgent(ABC):
     _instances = []
 
     class AgentConfig:
-        model = "mistral-nemo:latest"
+        model = ''
         type = "ollama"
         instruction: str = ""
         additional_instructions: str = ""

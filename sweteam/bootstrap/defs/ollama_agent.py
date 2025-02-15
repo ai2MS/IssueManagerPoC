@@ -46,7 +46,7 @@ class Ollama_Agent(BaseAgent):
         # use agent_config
         agent_config_dict = agent_config.to_dict()
         agent_config_dict.setdefault("model", agent_config_dict.get("model") or
-                                     config.OLLAMA_DEFAULT_BASE_MODEL or "mistral-nemo")
+                                     config.OLLAMA_DEFAULT_BASE_MODEL)
         agent_config_dict.setdefault("name", agent_config_dict.get(
             "name", "noname").replace(" ", "_"))
         super().__init__(agent_config_dict.get("name"))

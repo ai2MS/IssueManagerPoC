@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     RETRY_COUNT: int = 3
     DIR_STRUCTURE_YAML: str = PROJECT_NAME + "/dir_structure.yaml"
     OLLAMA_HOST: str = "http://172.17.0.1:11434"  # "http://localhost:11434"
-    OLLAMA_DEFAULT_BASE_MODEL: str = "mistral-nemo"
+    OLLAMA_DEFAULT_BASE_MODEL: str = "qwen2.5:14b"
 
     @field_validator('PROJECT_NAME', 'ISSUE_BOARD_DIR', 'AZURE_OPENAI_DEPLOYMENT_NAME', 'OPENAI_MODEL', 'AZURE_OPENAI_API_KEY', 'OPENAI_API_KEY')
     def validate_alphanumeric_and_underscore(cls, v, field):

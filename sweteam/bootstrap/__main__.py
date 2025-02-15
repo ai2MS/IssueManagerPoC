@@ -63,8 +63,10 @@ def main():
 
                 agents.append(stack.enter_context(AgentFactory.create(
                     agent_config=agt_cfg, previous_feedback=agt_feedback)))
-
-            orchestrator.orchestrate(agents)
+            try:
+                orchestrator.orchestrate(agents)
+            except Exception as e:
+                logger.fatal("Unrecoverable error in Orchestrator:", exc_info=e)
 
 
             logger.info(f"Exiting all agents...")

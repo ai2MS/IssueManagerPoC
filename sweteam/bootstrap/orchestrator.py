@@ -355,7 +355,7 @@ class OllamaOrchestrator(ollama_agent.Ollama_Agent, Orchestrator):
             "name": "orchestrator",
             "use_tools": True,
             "tools": [],
-            "model": "mistral-nemo",#"qwq",
+            "model": "qwen2.5:14b",#"qwq",
             "instruction": "You are an Orchestrator, you coordinate with other agents and ensure they follow their instructions. Sometimes, other agents may reply to your ask by giving you an answer as if this is a chat session, in those cases, they may provide you with markdown, including code snipets marks with ``` and ```, please help them save these answers to files according to the filenames specified in their answers.  Your main goal is to ensure the other agents' answer will result in useful file updates, if needed you help save their answers to the files using overwrite_file or ed_text_file tools.",
             "temperature": 0.1,
         })
