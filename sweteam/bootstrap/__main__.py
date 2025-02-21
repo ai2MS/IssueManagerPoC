@@ -32,7 +32,6 @@ def main():
     logger.debug(f"package name: {__package__}")
     agents_list = [entry.removesuffix(".json") for entry in os.listdir(
         agents_dir) if entry.endswith(".json")]
-    agents = []
     with Orchestrator() as orchestrator:
         with contextlib.ExitStack() as stack:
             for agt in agents_list:
@@ -61,12 +60,13 @@ def main():
                         "Error loading agent feedback %s: %s", agt, e, exc_info=e)
                     agt_feedback = None
 
-                agents.append(stack.enter_context(AgentFactory.create(
-                    agent_config=agt_cfg, previous_feedback=agt_feedback)))
+                stack.enter_context(AgentFactory.create(
+                    agent_config=agt_cfg, previous_feedback=agt_feedback))
             try:
-                orchestrator.orchestrate(agents)
+                orchestrator.orchestrate()
             except Exception as e:
-                logger.fatal("Unrecoverable error in Orchestrator:", exc_info=e)
+                logger.fatal("SWE Team run into error that can't be recovered, shuting down...", exc_info=e)
+                
 
 
             logger.info(f"Exiting all agents...")
@@ -100,7 +100,7 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
         subprocess.CalledProcessError: If uv or git commands fail
         Exception: For other initialization errors
     """
-    EMBEDDED_DEV_TEAM_NAME = "dev_agents"
+    EMBEDDED_DEV_TEAM_NAME = "embedded_dev_team"
     new_branch_name = ''
     try:
         current_file = os.path.realpath(__file__)

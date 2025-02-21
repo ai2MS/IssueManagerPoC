@@ -39,8 +39,10 @@ class Ollama_Agent(BaseAgent):
     """
     
     class TaskResult(BaseModel):
-        response: str
-        tool_use: List[Dict[str, str]]
+        role: str = 'assistant'
+        content: str
+        images: List[str] | None = None
+        tool_calls: List[Dict[str, str]] | None = None
 
     def __init__(self, agent_config: BaseAgent.AgentConfig = {}) -> None:
         # use agent_config
@@ -183,12 +185,12 @@ class Ollama_Agent(BaseAgent):
             final_response = self.llm_client.chat(
                 model=self.name, messages=self.messages)
             self.logger.debug(
-                f"<{self.name}> - {final_response['message']['content']}")
+                f"<{self.name}> - {final_response['message']}")
 
-            return self.TaskResult(response=str(final_response['message']['content']), tool_use=tool_use)
+            return final_response['message']
         else:
             self.logger.debug(f"<{self.name}> The session didn't use tools. Its response was:{response['message']}")
-            return self.TaskResult(response=response['message']['content'], tool_use=tool_use)
+            return response['message']
 
     def evaluate_agent(self, agent_name: str, score: int = 0, additional_instructions: str = "") -> str:
         """Provide evaluation of the response by an agent

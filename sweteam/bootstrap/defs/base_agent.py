@@ -11,7 +11,7 @@ class BaseAgent(ABC):
     _instances = []
 
     class AgentConfig:
-        model = ''
+        model = "mistral-nemo:latest"
         type = "ollama"
         instruction: str = ""
         additional_instructions: str = ""
@@ -80,26 +80,25 @@ class BaseAgent(ABC):
     def __init__(self, agent_name: str = '') -> None:
         self.name = agent_name
         self.config = self.AgentConfig()
-        self.llm_client: self.LLMClient = None
+        self.llm_client: BaseAgent.LLMClient
         self.logger = get_logger(
             f'{self.__class__.__name__ or ""}[{self.name}]')
         self.__class__._instances.append(self)
 
     @classmethod
     def instances(cls, include_children: bool = True) -> list:
-        if not include_children:
-            return cls._instances  # Return the list of all instances for this class
-        else:
-            temp_instances = []
+        if include_children:
+            temp_instances = set()
             # Iterate through all direct child classes
             for subclass in cls.__subclasses__():
                 if hasattr(subclass, '_instances'):
-                    temp_instances.extend(subclass._instances)
+                    temp_instances.update(subclass._instances)
             # Include instances of the current class as well
             if hasattr(cls, '_instances'):
-                temp_instances.extend(cls._instances)
-            return temp_instances
-
+                temp_instances.update(cls._instances)
+            return list(temp_instances)
+        else:
+            return cls._instances  # Return the list of all instances for this class
  
     # method to list/read/write issues
     def issue_manager(self, action: str, issue: str = '',
