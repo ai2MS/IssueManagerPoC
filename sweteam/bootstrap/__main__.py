@@ -21,6 +21,7 @@ from . import utils, logging, logger
 from .config import config
 from .defs import AgentFactory, BaseAgent
 from .utils.log import logging_context
+from .orchestrator import OrchestratorFactory, Orchestrator
 
 
 def main():
@@ -32,7 +33,7 @@ def main():
     logger.debug(f"package name: {__package__}")
     agents_list = [entry.removesuffix(".json") for entry in os.listdir(
         agents_dir) if entry.endswith(".json")]
-    with Orchestrator() as orchestrator:
+    with OrchestratorFactory.create(type="ollama") as orchestrator:
         with contextlib.ExitStack() as stack:
             for agt in agents_list:
                 agt_cfg: BaseAgent.AgentConfig
@@ -159,9 +160,9 @@ def create_project(project_name: str = 'default_project', overwrite: bool = Fals
                                 project_dir, toml_project_name, project_name)
                 sys.exit(1)
         else:
-            src_item = os.path.join(os.path.dirname(current_parent_dir), "pyproject.toml")
-            dst_item = os.path.join("pyproject.toml")
-            shutil.copy2(src_item, dst_item)
+            #src_item = os.path.join(os.path.dirname(current_parent_dir), "pyproject.toml")
+            #dst_item = os.path.join("pyproject.toml")
+            #shutil.copy2(src_item, dst_item)
             uv_init_result = subprocess.run(
                 ['uv', 'init', '--name', project_name, '--app'], capture_output=True, text=True)
             uv_init_result.check_returncode()

@@ -56,7 +56,7 @@ class Ollama_Agent(BaseAgent):
         self.logger.debug("loaded agent %s config from parameter agent_config: %s as %s",
                           self.name, agent_config, self.config)
 
-        self.llm_client = ollama.Client(host=config.OLLAMA_HOST)
+        self.llm_client: ollama.Client = ollama.Client(host=config.OLLAMA_HOST)
 
         if self.config.use_tools:
             self.tools = self.config.tools
@@ -82,16 +82,12 @@ class Ollama_Agent(BaseAgent):
             # Note that Ollama uses "model" property to represent roughly an "agent" concept
             # the model name represents an object that is of a certain model type with initial system prompt
             # so the model name in Ollama is not the model type, rather it's an entity that includes system prompt
-            modelfile = (f"FROM {self.config.model}\n"
-                         f"SYSTEM {self.config.instruction!r}\n"
-                         f"PARAMETER temperature {self.config.temperature}")
-            self.logger.info("creating ollama model %s", modelfile)
             response = self.llm_client.create(
                 model=self.name, 
                 from_=self.config.model, system=self.config.instruction, 
                 parameters={"temperature": self.config.temperature},
                 stream=False)
-            self.logger.info("created ollama model received %s", response)
+            self.logger.info("created ollama model %s received %s", self.name, response)
         self.model_initialized = True
 
         return self

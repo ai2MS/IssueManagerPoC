@@ -17,21 +17,6 @@ agents_dir = os.path.join("/",
 agents_list = [entry.removesuffix(".json") for
                entry in os.listdir(agents_dir) if entry.endswith(".json")]
 
-agent_roles: str = """\
-pm: analyze software feature requirements from the user, break down the issue to smaller, more specific\
- sub issues that are sub-components of the requirements, including requirement refinement, architecture\
- UI design, coding backend and frontend, and build containerized packages and deploy.
-architect: based on the given issue, design the technology to be used, and directory structure of what files\
- should be create or updated to realize the feature; if the issue description is not specific enough yet\
- help the pm to further break down the issue to multiple more specific sub-issues.
-backend_dev: develop backend code that serve the API and realize core business functionalities\
- including business logic, and data preservation code.
-front_end_dev: develop web frontend code that serve the user interface, and calling the backend API\
- to delegate user's interaction to be fulfilled by the backend.
-designer: design UI and UX for the web frontend, create wireframe designs and progress to css implementation of the UI
-sre: build Dockerfile to package the software as container, test the containerized package and deploy to production\
- as the sub issue specified.
-"""
 standard_tools = [
     {
         "type": "function",
