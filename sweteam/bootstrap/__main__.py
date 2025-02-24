@@ -310,7 +310,7 @@ def copy_directory(src_dir, dst_dir):
 
 if __name__ == "__main__":
     match __package__ or '':
-        case s if s.endswith("bootstrap"):
+        case s if s.endswith("bootstrap_"): #allows in bootstrap debug avoid transfer flow to default_project
             try:
                 project_name = config.PROJECT_NAME
                 overwrite = False

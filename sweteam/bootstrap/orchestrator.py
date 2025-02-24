@@ -431,6 +431,15 @@ class OpenAIOrchestrator(openai_agent.OpenAI_Agent, Orchestrator):
                 f"<{self.name}> - Orchestrator trying to find and remove orphan assistants, received Error: {e}", exc_info=e)
         super().__exit__(exc_type, exc_val, exc_tb)
 
+class OrchestratorFactory(Orchestrator):
+    @staticmethod
+    def create(type: str):
+        if type == "ollama":
+            return OllamaOrchestrator()
+        elif type == "openai":
+            return OpenAIOrchestrator()
+        else:
+            raise ValueError("Agent type %s not recognized.", type)
 
 if __name__ == "__main__":
     import doctest
