@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from . import logger, config
 from .utils import issue_manager
 from .defs import BaseAgent, ollama_agent, openai_agent
+from .defs.agent_defs import standard_tools, tool_instructions
 
 
 class Orchestrator(BaseAgent):
@@ -258,7 +259,7 @@ class Orchestrator(BaseAgent):
                     "Does the user prompt look like a software development requirement?", new_issue)
                 if check_input.is_true:
                     self.logger.info("Creating a new issue: %s", new_issue)
-                    issue_manager("create", content=new_issue)
+                    self.issue_manager("create", content=new_issue)
                     open_issues = get_open_issues()
                 else:
                     self.logger.warning(
@@ -269,22 +270,7 @@ class Orchestrator(BaseAgent):
                 map(int, x.get("issue", "").split("/")))])
             for open_issue in open_issues:
                 issue_number = open_issue.get("issue")
-                if not open_issue.get("assignee") or self.name in open_issue.get("assignee", ""):
-                    # if not assigned or assigned to myself, try assign it
-                    to_self_prompt = f"Issue {issue_number} is assigned to \
-                                       {open_issue.get("assignee", "No One")}, please \
-                                        review the details of this issue using issue_manager and \
-                                        determine which agent should be responsible for this issue. \
-                                        using the below roles descriptions, then use the issue_manager \
-                                        assign command to assign the issue to the agent.\nagent roles: {agent_roles}"
-                    o_reply = self.perform_task(
-                        to_self_prompt, f"self({self.name})", {'issue': open_issue})
-
-                    if (updated_open_issues := get_open_issues(issue_number)):
-                        open_issue = updated_open_issues[0]
-                        self.logger.info("Issue %s is now assigned to %s", issue_number, open_issue.get('assignee'))
-
-                for agt in [a for a in agents if a.name == open_issue.get('assignee')]:
+                for agt in [a for a in agents if (a.name == open_issue.get('assignee') != self.name)]:
                     to_agt_prompt = f"\nIssue {issue_number} is assigned to you "
                     f"and is in {open_issue.get('status')} status, it is about {open_issue.get('title')}. "
                     "Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, "
@@ -331,13 +317,26 @@ class Orchestrator(BaseAgent):
                         f"<{self.name}> - Orchestrator self perform task update additional instructions result:{o_reply}")
                     break
                 else:
-                    logger.warning(
-                        f"<{self.name}> - No agent found with name {open_issue.get('assignee')}")
-                    to_self_prompt = f"Issue {open_issue.get(
-                        'issue')} is not yet assigned to a worker agent, analyze it's description and details, and assign it to the best agent to tackle its current status."
+                    logger.warning("No agent found with name %s", open_issue.get('assignee'))
+                    # if not assigned, assigned to someone does not exist, or assigned to myself, try assign it
+                    to_self_prompt = (f"Issue {issue_number} is assigned to "
+                                      f"{open_issue.get("assignee", "No One")}, please review the details of "
+                                      "this issue using issue_manager and determine which agent should be "
+                                      "responsible for this issue. using the below roles descriptions, then "
+                                      "use the issue_manager assign command to assign the issue to the agent.\n"
+                                      f"agent roles: {agent_roles}."
+                                      f"{tool_instructions['issue_manager']}")
                     o_reply = self.perform_task(
-                        to_self_prompt, f"analyze issue {open_issue}", {"issue": open_issue})
-                # self.upload_issues_as_vector_store()
+                        to_self_prompt, f"self({self.name})", {'issue': open_issue})
+
+                # Higher priority issue should be handled first, so break the loop
+                break
+                
+        open_issues = get_open_issues()
+        if open_issues:
+            self.logger.warning("Orchestrator tried %d times, but there are still open issues: %s.", config.RETRY_COUNT, open_issues)
+        else:
+            self.logger.info("Orchestrator successfully processed all open issues.")
 
         return get_open_issues()
         # print("***************")

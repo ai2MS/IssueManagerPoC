@@ -3,9 +3,7 @@ import os
 import re
 import yaml
 from ..config import config
-from .log import get_logger
-
-logger = get_logger(__package__ or __name__)
+from .log import logger
 
 
 def dir_tree(path_: str, return_yaml: bool = False) -> str:
@@ -31,6 +29,8 @@ def dir_tree(path_: str, return_yaml: bool = False) -> str:
                           "comment_prefix": "#"},
                          {"type": "Docker-compose",
                           "filename_pattern": r"docker-compose.ya?ml$", "comment_prefix": ""},
+                         {"type": "TOML",
+                          "filename_pattern": r".*to?ml$", "comment_prefix": "description"},
                          {"type": "Javascript",
                           "filename_pattern": r".*\.(js|ts)$", "comment_prefix": "/**"},
                          ]
@@ -45,7 +45,8 @@ def dir_tree(path_: str, return_yaml: bool = False) -> str:
                 for line in lines:
                     if comment_on_next_line or line.strip().startswith(rule["comment_prefix"]):
                         comment = line.strip().removeprefix(
-                            rule["comment_prefix"]).removesuffix("\n").strip()
+                            rule["comment_prefix"]).removesuffix("\n").strip(                                
+                            ).removesuffix(rule["comment_prefix"][::-1]).strip()
                         if comment:
                             break
                         else:

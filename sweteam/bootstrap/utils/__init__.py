@@ -13,25 +13,10 @@ import yaml
 import json
 from datetime import datetime
 from .initialize_project import initialize_package, initialize_Dockerfile, initialize_startup_script
-from .log import get_logger as plain_get_logger, logging
+from .log import logger
 from ..config import config
 
 
-def get_logger(name: str = '', stream: str | bool | None = None, file: str | bool | None = None,
-               *, log_file: str | None = None, level: str | None = None) -> logging.Logger:
-    logger_name = config.PROJECT_NAME if name is None else name
-    stream_level = config.LOG_LEVEL_CONSOLE if stream is None else stream
-    file_level = config.LOG_LEVEL if file is None else file
-    log_level = config.LOG_LEVEL if level is None else level
-    log_filename = ((config.PROJECT_NAME or os.path.basename(
-        os.getcwd())) + ".log") if log_file is None else log_file
-
-    return plain_get_logger(logger_name, stream_level, file_level, log_file=log_filename, level=log_level)
-
-
-logger = get_logger((__package__ or __name__ or ""))
-logger.debug(
-    "utils logger initialized with the following handlers %s.", logger.handlers)
 
 
 class Action(Enum):
@@ -43,7 +28,7 @@ class Action(Enum):
     ASSIGN = "assign"
 
 def issue_manager(action: str, issue: str = '', only_in_state: list = [],
-                  content: str | None = None, assignee: str | None = None, caller: str = "manually") -> dict | list:
+                  content: str | None = None, assignee: str | None = None, caller: str = "unknown") -> dict | list:
     """Manage issues: list, create, read, update, assign
     Example::
     >>> issue_manager("list", "0")

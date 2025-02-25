@@ -5,6 +5,7 @@ import logging.handlers
 from contextlib import contextmanager
 from typing import Generator
 import os
+from ..config import config
 
 
 def get_logger(name: str, stream: str | bool = 'INFO', file: str | bool = '',
@@ -61,6 +62,23 @@ def get_logger(name: str, stream: str | bool = 'INFO', file: str | bool = '',
     return logger_
 
 
+def get_default_logger(name: str = '', stream: str | bool | None = None, file: str | bool | None = None,
+               *, log_file: str | None = None, level: str | None = None) -> logging.Logger:
+    logger_name = config.PROJECT_NAME if name is None else name
+    stream_level = config.LOG_LEVEL_CONSOLE if stream is None else stream
+    file_level = config.LOG_LEVEL if file is None else file
+    log_level = config.LOG_LEVEL if level is None else level
+    log_filename = ((config.PROJECT_NAME or os.path.basename(
+        os.getcwd())) + ".log") if log_file is None else log_file
+
+    return get_logger(logger_name, stream_level, file_level, log_file=log_filename, level=log_level)
+
+
+logger = get_default_logger((__package__ or __name__ or ""))
+logger.debug(
+    "utils default logger initialized with the following handlers %s.", logger.handlers)
+
+
 @contextmanager
 def logging_context(*args, **kwargs) -> Generator[logging.Logger, None, None]:
     """use contextmanager to setup/shutdown logging"""
@@ -76,3 +94,4 @@ def logging_context(*args, **kwargs) -> Generator[logging.Logger, None, None]:
             print(f"Can't log final message to logger, {e=}"
                   "shutting down the logging facility...")
         logging.shutdown()
+

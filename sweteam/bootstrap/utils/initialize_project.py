@@ -1,7 +1,5 @@
 import os
-from .log import get_logger
-
-logger = get_logger(__package__ or __name__)
+from .log import logger
 
 
 def initialize_agent_files(agent_parent_dir: str | None = None) -> str:
@@ -11,25 +9,33 @@ def initialize_agent_files(agent_parent_dir: str | None = None) -> str:
         f"<Initializing> - updating agents instructions as part of project setup. Should not be used in production")
     import os
     import json
-    from ..defs.agent_defs import new_instructions
+    from ..defs.agent_defs import agents, tool_instructions, standard_tools
 
     agents_dir = os.path.join(
         agent_parent_dir if agent_parent_dir else os.path.dirname(os.path.dirname(__file__)), "agents")
     logger.info(f"updating agent info in {agents_dir=}")
-    agents_list = [entry.removesuffix(".json") for entry in os.listdir(
-        agents_dir) if entry.endswith(".json")]
-    for agent_name in agents_list:
-        config_json = os.path.join(agents_dir, f"{agent_name}.json")
-        if new_instructions.get(agent_name):
-            with open(config_json, "r") as f:
-                agent_config = json.load(f)
+    agent_json_files = [entry for entry in os.listdir(agents_dir) if entry.endswith(".json")]
+    for agent_json in agent_json_files:
+        fullpath_json = os.path.join(agents_dir, agent_json)
+        agent_name = agent_json.removesuffix(".json")
+        if agents.get(agent_name):
+            agent: dict = agents.get(agent_name)
+            with open(fullpath_json, "r") as f:
+                config_in_json: dict = json.load(f)
 
-            agent_config["instruction"] = new_instructions[agent_name] + \
-                new_instructions["all"]
-            with open(config_json, "w") as f:
-                json.dump(agent_config, f, indent=4)
+            config_in_json.update(agent)
+
+            for idx, tool in enumerate(agent.get("tools",[])):
+                if isinstance(tool, str):
+                    index = config_in_json["tools"].index(tool)
+                    config_in_json["tools"][index:index+1] = [t for t in standard_tools if t.get("function",{"name":""}).get("name") == tool]
+                    config_in_json["instruction"] = config_in_json.get("instruction", '') \
+                        + tool_instructions.get(tool,'')
+
+            with open(fullpath_json, "w") as f:
+                json.dump(config_in_json, f, indent=4)
     logger.info(
-        f"<Initializing> - updated {len(agents_list)} agents instructions")
+        f"<Initializing> - updated {len(agent_json_files)} agents instructions")
     return 'done.'
 
 

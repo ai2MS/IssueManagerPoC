@@ -23,9 +23,6 @@ import logging
 import logging.handlers
 import os
 from .config import config
-from .utils import get_logger
-
-
-logger = get_logger((__package__ or __name__ or ""))
+from .utils.log import logger
 
 my_name = (config.PROJECT_NAME or os.path.basename(os.getcwd()))

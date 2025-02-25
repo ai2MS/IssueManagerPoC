@@ -32,7 +32,8 @@
             "type": "debugpy",
             "request": "launch",
             "module": "sweteam.bootstrap",
-            "args": "${command:pickArgs}",
+            //"args": "${command:pickArgs}",
+            "console": "integratedTerminal",
             "subProcess": false
         },
         {
@@ -45,6 +46,7 @@
             "request": "launch",
             "cwd": "${workspaceFolder}/default_project",
             "module": "embedded_dev_team",
+            "console": "integratedTerminal",
             "subProcess": false
         }
     ]

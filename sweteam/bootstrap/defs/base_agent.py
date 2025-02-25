@@ -4,8 +4,8 @@ import os
 import re
 
 from pydantic import BaseModel
-from ..utils import get_logger, issue_manager, dir_structure, execute_command, execute_module
-
+from ..utils import issue_manager, dir_structure, execute_command, execute_module
+from ..utils.log import get_logger
 
 class BaseAgent(ABC):
     _instances = []
