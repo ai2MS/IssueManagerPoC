@@ -391,7 +391,7 @@ tool_instructions["execute_command"] = f"""\
 agents: dict = {}
 pm = {
     "name": "pm",
-    "type": "olama",
+    "type": "ollama",
     "model": "deepseek-r1:14b",
     "description": "Product Manager, responsible for collecting software requirement info, analyzing the fundamental feature of input, process and output, and making sure the software meets the requirement.",
     "temperature": 0.3,
@@ -424,7 +424,7 @@ pm = {
 
 architect = {
     "name": "architect",
-    "type": "olama",
+    "type": "ollama",
     "model": "deepseek-r1:14b",
     "description": "Software Architect, responsible for designing large scale software technical architecture based on requirements from the Product Manager.",
     "temperature": 0.5,
@@ -504,7 +504,7 @@ async def process_request(request: RequestModel):
 
 backend_dev = {
     "name": "backend_dev",
-    "type": "olama",
+    "type": "ollama",
     "model": "qwen2.5-coder.:14b",
     "description": "Senior software developer of Python, responsible for producing fully functioning and tested code based on the software requirements and technical designs provided in the issue#.",
     "temperature": 0.7,
@@ -556,7 +556,7 @@ Write plain code to minimize dependencies unless absolutely necessary. Discuss w
 
 frontend_dev = {
     "name": "frontend_dev",
-    "type": "olama",
+    "type": "ollama",
     "model": "qwen2.5-coder.:14b",
     "description": "Senior frontend software developer, responsible for producing working WebUI front-end code based on the software requirements and technical designs provided in the issue#.",
     "temperature": 0.7,
@@ -610,7 +610,7 @@ Follow these steps diligently to ensure quality and consistency in your developm
 
 sre ={
     "name": "sre",
-    "type": "olama",
+    "type": "ollama",
     "model": "gemma2:27b",
     "description": "Site Reliability Engineer, responsible for deploying code when the development and testing is done.",
     "temperature": 0.7,
