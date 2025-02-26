@@ -1,6 +1,7 @@
 """Ollama Agent, won't use until local model are possible."""
-import os
 import json
+import os
+import re
 import yaml
 import ollama
 from datetime import datetime
@@ -107,86 +108,97 @@ class Ollama_Agent(BaseAgent):
         """
         return f"<Agent: {self.name}>"
 
-    def messages_append(self, new_message: object):
-        new_message_len = len(f"{new_message}")
-        while len(f"{self.messages}") + new_message_len > self.config.context_window_size * 1024 * 0.75:
-            del self.messages[1]
+    def messages_append(self, new_message: object, msg_hist_object: list | None = None) -> None:
         self.messages.append(new_message)
+        while len(json.dumps(msg_hist_object)) > self.config.context_window_size * 1024 * 0.75:
+            del msg_hist_object[0]
+        if msg_hist_object is not None:
+            msg_hist_object.append(new_message)
+            while len(json.dumps(msg_hist_object)) > self.config.context_window_size * 1024 * 0.75:
+                del msg_hist_object[0]
+        
 
     # method to list/read/write issues
 
-    def perform_task(self, task: str = '', from_: str = "Unknown", context: dict = {}) -> TaskResult:
+    def perform_task(self, task: str = '', from_: str = "Unknown", context: dict = {}, use_history: bool = False) -> TaskResult:
         self.__enter__()
-        self.messages.append({'role': 'user', 'content': task})
-        tool_use = []
-        if self.tools:
-            msg_logger.info("%s >> %s - %s (support tools)",
-                            from_, self.name, task)
-            self.logger.info("%s >> %s - %s (support tools)",
-                             from_, self.name, task)
-            response = self.llm_client.chat(
-                model=self.name, messages=self.messages, tools=self.tools)
+        tool_used = []
+        response = None
+        msg_logger.info("%s >> %s - %s (use tools=%s)",
+                        from_, self.name, task, bool(self.tools))
+        self.logger.info("%s >> %s - %s (use tools=%s)",
+                            from_, self.name, task, bool(self.tools))
+        func_names = [item['function']['name']
+                            for item in self.tools if item['type'] == "function"]
+        
+        if use_history:
+            task_messages = self.messages
         else:
-            msg_logger.info("%s >> %s - %s (no tools)", from_, self.name, task)
-            self.logger.info("%s >> %s - %s (no tools)",
-                             from_, self.name, task)
+            task_messages =[]
+        self.messages_append({'role': 'user', 'content': f"Given the following context: {context}"}, msg_hist_object=task_messages)
+        self.messages_append({'role': 'user', 'content': f"Please do the following: {task}"}, msg_hist_object=task_messages)
+        
+        while self.tools or response is None:
             response = self.llm_client.chat(
-                model=self.name, messages=self.messages)
+                model=self.name, messages=task_messages, tools=(self.tools if self.config.use_tools else None))
 
-        # Add the model's response to the conversation history
-        self.messages_append(response['message'])
+            # Add the model's response to the conversation history
+            self.messages_append(dict(response['message']), msg_hist_object=task_messages)
 
-        # Process function calls made by the model
-        if response['message'].get('tool_calls'):
-            self.logger.debug("<%s> The session is trying to use tools: %s",
-                              self.name, response['message']['tool_calls'])
-            func_names = [item['function']['name']
-                          for item in self.tools if item['type'] == "function"]
-            for tool in response['message']['tool_calls']:
-                arguments = tool['function']['arguments']
-                func_name = tool['function']['name']
-                if func_name in func_names:
-                    func = getattr(self, func_name, None)
-                    try:
-                        function_response = func(
-                            **arguments) if func else f"Error {func_name} is configured as a tool but is not a method I have."
-                        self.logger.debug(
-                            "calling <%s> returned: %s", func_name, function_response)
-                    except Exception as e:
-                        function_response = f"calling {func_name} failed with Error: {e!r}"
-                        self.logger.error(
-                            "calling <%s(%s)> run into Error: %s", func_name, arguments, e, exc_info=e)
-                    # Add function response to the conversation
-                    self.messages_append(
-                        {
-                            'role': 'tool',
-                            'content': repr(function_response),
-                        }
-                    )
-                    tool_use.append({
-                        "tool_type": "function",
-                        "tool_name": func_name,
-                        "tool_return": str(function_response)
-                    })
-                    self.logger.debug(
-                        "<%s> - tool %s returned: %s", self.name, func_name, function_response)
-                else:
-                    self.messages_append(
-                        {
-                            'role': 'tool',
-                            'content': f"{func_name} is not a configured tool."
-                        }
-                    )
-                    # Second API call: Get final response from the model
-            final_response = self.llm_client.chat(
-                model=self.name, messages=self.messages)
+            # Process function calls made by the model
+            if response['message'].get('tool_calls'):
+                self.logger.debug("<%s> The session is trying to use tools: %s",
+                                self.name, response['message']['tool_calls'])
+
+                for tool in response['message']['tool_calls']:
+                    arguments = tool['function']['arguments']
+                    func_name = tool['function']['name']
+                    if func_name in func_names:
+                        func = getattr(self, func_name, None)
+                        try:
+                            function_response = func(
+                                **arguments) if func else f"Error {func_name} is configured as a tool but is not a method I have."
+                            self.logger.debug(
+                                "calling <%s> returned: %s", func_name, function_response)
+                        except Exception as e:
+                            function_response = f"calling {func_name} failed with Error: {e!r}"
+                            self.logger.error(
+                                "calling <%s(%s)> run into Error: %s", func_name, arguments, e, exc_info=e)
+                        # Add function response to the conversation
+                        self.messages_append(
+                            {
+                                'role': 'tool',
+                                'content': repr(function_response),
+                            }, msg_hist_object=task_messages
+                        )
+                        tool_used.append({
+                            "sequence_no": len(tool_used) + 1,
+                            "tool_type": "function",
+                            "tool_name": func_name,
+                            "tool_return": str(function_response)
+                        })
+                    else:
+                        self.messages_append(
+                            {
+                                'role': 'tool',
+                                'content': f"{func_name} is not a configured tool."
+                            }, msg_hist_object=task_messages
+                        )
+            else:
+                break
+
             self.logger.debug(
-                f"<{self.name}> - {final_response['message']}")
+                "partial_response: %s", response['message'])
 
-            return final_response['message']
         else:
-            self.logger.debug(f"<{self.name}> The session didn't use tools. Its response was:{response['message']}")
-            return response['message']
+            self.logger.debug("The session didn't use tools. ")
+
+        final_message = dict(response['message'])
+        final_message['content'] = re.sub(r'<(think|thinking)>.*?</\1>', '', final_message['content'], flags=re.DOTALL)
+        final_message['tool_used'] = tool_used
+        self.logger.debug("final response: %s", final_message)
+
+        return final_message
 
     def evaluate_agent(self, agent_name: str, score: int = 0, additional_instructions: str = "") -> str:
         """Provide evaluation of the response by an agent
@@ -242,14 +254,13 @@ class Ollama_Agent(BaseAgent):
         """
         self.logger.debug(
             f"<{self.name}> - chat_with_other_agent({agent_name},{message},{issue})")
-        the_other_agent = [a for a in BaseAgent.instances(
-            True) if a.name == agent_name][0]
-        if the_other_agent:
+        for the_other_agent in [a for a in BaseAgent.instances(True) if a.name == agent_name]:
             chat_result = the_other_agent.perform_task(
-                message, self.name, {"issue": issue})
+                message, self.name, use_history=True)
             return f"{agent_name} replied: {chat_result.get('respons')}.  {chat_result.get('tool_use')!r}"
         else:
-            raise Exception(f"Agent {agent_name} not found")
+            raise Exception(f"chat_with_other_agent cannot find agent_name={agent_name}, "
+                            "please make sure the other agent you want to chat with exist in the agent_roles list.")
 
 
 def test():

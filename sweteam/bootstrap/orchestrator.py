@@ -3,6 +3,7 @@ This is the agent to ensure every step follows software development process.
 The goal of this agent is not to innovate, rather, you check other agent's responses, and make sure they adhere to required process.
 """
 
+import json
 from re import A
 from pydantic import BaseModel
 from . import logger, config
@@ -254,16 +255,17 @@ class Orchestrator(BaseAgent):
         while (retry_count := retry_count - 1) > 0:
             open_issues = get_open_issues()
             if not open_issues:
-                new_issue = self.get_human_input("\nNo open issues. What would you like the team to tackle next: \n")
+                new_request = self.get_human_input("\nNo open issues. What would you like the team to tackle next: \n")
                 check_input = self.is_true(
-                    "Does the user prompt look like a software development requirement?", new_issue)
+                    "Does the user prompt look like a software development requirement?", new_request)
                 if check_input.is_true:
-                    self.logger.info("Creating a new issue: %s", new_issue)
-                    self.issue_manager("create", content=new_issue)
+                    self.logger.info("Creating a new issue: %s", new_request)
+                    title = self.distill("Please summarize the following to create a title for this request?", "", new_request).answer
+                    self.issue_manager("create", content={"title": title, "description":new_request})
                     open_issues = get_open_issues()
                 else:
                     self.logger.warning(
-                        'The user input """%s""" is not a valid software development request, because %s', new_issue, check_input.exaplanation)
+                        'The user input """%s""" is not a valid software development request, because %s', new_request, check_input.exaplanation)
                     continue
 
             open_issues.sort(key=lambda x: [x.get("priority", "5"), tuple(
@@ -271,20 +273,51 @@ class Orchestrator(BaseAgent):
             for open_issue in open_issues:
                 issue_number = open_issue.get("issue")
                 for agt in [a for a in agents if (a.name == open_issue.get('assignee') != self.name)]:
-                    to_agt_prompt = f"\nIssue {issue_number} is assigned to you "
+                    to_agt_prompt = (f"Issue {issue_number} is assigned to you "
                     f"and is in {open_issue.get('status')} status, it is about {open_issue.get('title')}. "
                     "Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, "
                     f"If you feel it is not clear and specific enough please analyze how to describe it in more details and create more specific sub issues for coding."
-                    agt_reply = agt.perform_task(
-                        to_agt_prompt, self.name, {"issue": open_issue})
+                    )
+                    agt_reply = agt.perform_task(to_agt_prompt, self.name, 
+                                context={'issue': self.issue_manager(action='read', issue=open_issue.get('issue'))})
 
                     # Review the response
                     response_evaluation = self.evalate_response(to_agt_prompt,
                                                                 str(agt_reply), open_issue)
                     self.logger.debug("Review response: %s", response_evaluation)
-                    # was the response satisfactory? does it need to be re-done?
+
                     # should update feedback file here?
 
+                    if response_evaluation.score <= 5:
+                        # was the response not satisfactory? have it re-done?
+                        self.logger.warning(
+                            "Agent %s response was not satisfactory, score: %s, agent_response: %s"
+                            , agt.name, response_evaluation.score, agt_reply)
+                        continue
+
+                    has_code_to_update = self.is_true(
+                        "Does the response include code snippets?", to_agt_prompt, json.dumps(agt_reply))
+                    if has_code_to_update.is_true:
+                        save_code_prompt = (f"The assistant {agt.name} provided code snippets in the response. "
+                                            "use apply_unified_diff() or overwrite_file() tool to save the code snippets "
+                                            "to the files meant for these code snipets to be saved in."
+                                            f"if you are uncertain, use the chat_with_other_agent() tool to ask {agt.name} "
+                                            "to provide the filenames for the code snipets."
+                                            f"apply_unified_diff() tool instruction: {tool_instructions['apply_unified_diff']}"
+                                            f"overwrite_file() tool instruction: {tool_instructions['overwrite_file']}"
+                                            f"chat_with_other_agent() tool instruction: {tool_instructions['chat_with_other_agent']}"
+                        )
+                        save_code_reply = self.perform_task(save_code_prompt, self.name, 
+                                context={'issue': self.issue_manager(action='read', issue=open_issue.get('issue'))})
+                        code_saved = self.is_true(
+                            "Was the code saved successfully?", save_code_prompt, save_code_reply)
+                        if code_saved.is_true:
+                            self.logger.info(
+                                "Code snippets saved successfully.")
+                        else:
+                            self.logger.warning(
+                                "Code snippets failed to save.")
+                            
                     # check if the status of the issue is updated
                     # If not, update the issue using the issue_manager tool
 
@@ -313,24 +346,22 @@ class Orchestrator(BaseAgent):
                     o_reply = self.perform_task(to_self_prompt, f"Orchestrator update "
                                                 f"{agt.name} additional instructions", {"issue": open_issue})
 
-                    logger.debug(
+                    self.logger.debug(
                         f"<{self.name}> - Orchestrator self perform task update additional instructions result:{o_reply}")
                     break
                 else:
-                    logger.warning("No agent found with name %s", open_issue.get('assignee'))
+                    self.logger.warning("No agent found with name %s", open_issue.get('assignee'))
                     # if not assigned, assigned to someone does not exist, or assigned to myself, try assign it
-                    to_self_prompt = (f"Issue {issue_number} is assigned to "
-                                      f"{open_issue.get("assignee", "No One")}, please review the details of "
-                                      "this issue using issue_manager and determine which agent should be "
-                                      "responsible for this issue. using the below roles descriptions, then "
-                                      "use the issue_manager assign command to assign the issue to the agent.\n"
-                                      f"agent roles: {agent_roles}."
-                                      f"{tool_instructions['issue_manager']}")
+                    to_self_prompt = (f"Issue {issue_number} is assigned to {open_issue.get("assignee", "No One")},  "
+                                      "which is incorrect. Based on these roles descriptions, use the issue_manager tool "
+                                      "action=assign to assign this issue to the most appropriate agent.\n"
+                                      f"agent_roles: {agent_roles}."
+                                      f"issue_manager() tool instruction: {tool_instructions['issue_manager']}")
                     o_reply = self.perform_task(
-                        to_self_prompt, f"self({self.name})", {'issue': open_issue})
+                        to_self_prompt, f"self({self.name})", context={'issue': self.issue_manager(action='read', issue=open_issue.get('issue'))})
 
-                # Higher priority issue should be handled first, so break the loop
-                break
+                    # Issue re-assigned, Higher priority issue should be handled first, so break the loop
+                    break
                 
         open_issues = get_open_issues()
         if open_issues:

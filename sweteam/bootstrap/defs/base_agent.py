@@ -153,14 +153,14 @@ class BaseAgent(ABC):
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
             self.logger.info(
-                f"<{self.name}> - read_file {filepath} successfully.")
+                "read_file %s successfully.", filepath)
             result = {
                 'filepath': filepath,
                 'content': content,
             }
         except Exception as e:
             self.logger.warning(
-                f"<{self.name}> -read_file Failed to read file {filepath}, received Error {e}.")
+                "read_file Failed to read file %s", filepath, exc_info=e)
             content = f"{e}"
             result = {
                 'filepath': filepath,
@@ -184,7 +184,8 @@ class BaseAgent(ABC):
             File deleteme.test has been written successfully.
         """
         self.logger.debug(
-            f"<{self.name}> - overwrite_file {filename} - {content}")
+            "%swriting file %s with content %s", "over" if force else '', filename,content)
+
         if not os.path.exists(filename) or force:
             try:
                 directory = os.path.dirname(filename)
@@ -195,19 +196,18 @@ class BaseAgent(ABC):
                     f.write(content)
 
                 self.logger.info(
-                    f"<{self.name}> - overwrite_file {filename} successfully.")
-                return f"File {filename} has been written successfully."
+                    "overwrite_file %s successfully.", filename)
+                result = f"File {filename} has been written successfully."
             except Exception as e:
                 self.logger.error(
-                    f"<{self.name}> - overwrite_file Failed to write to file {filename}, received Error {e}.")
-                return f"Error: {str(e)} ____ {e}"
+                    "overwrite_file Failed to write to file %s", filename, exc_info=e)
+                result = f"Error overwriting file {filename} due to: {str(e)} __details__ {e}"
         else:
-            result = json.loads(self.read_file(filename))
-            result['rejection'] = f"file {filename} already exists, "
-            "its content is in this message, please make sure the the new "
-            "content is not causing existing code to fail, then use "
-            "`force=True` to overwrite the existing content."
-            return json.dumps(result)
+            result = f"file {filename} already exists, please review its content at the end of this message. "
+            "if you are certain your proposed change will not break things, you can then use "
+            f"`force=True` to overwrite the existing content: <{self.read_file(filename)}>"
+
+        return result
 
     def apply_unified_diff_to_file(self, filepath: str, diffs: str) -> str:
         """accept unified diff hunks and apply to filepath

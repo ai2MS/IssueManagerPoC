@@ -131,5 +131,5 @@
         }
     ],
     "description": "Product Manager, responsible for collecting software requirement info, analyzing the fundamental feature of input, process and output, and making sure the software meets the requirement.",
-    "use_tools": true
+    "use_tools": false
 }

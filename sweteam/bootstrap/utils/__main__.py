@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from . import dir_structure, issue_manager
+from .log import logger
 from .initialize_project import initialize_agent_files
 
 
@@ -41,7 +42,10 @@ if __name__ == "__main__":
                         if sys.argv[i].startswith("issue="):
                             issman_args["issue"] = sys.argv[i].removeprefix(
                                 ("issue="))
-                    issue_result = json.loads(issue_manager(**issman_args))
+                        if sys.argv[i].startswith("assignee="):
+                            issman_args["assignee"] = sys.argv[i].removeprefix(
+                                ("assignee="))
+                    issue_result = issue_manager(**issman_args)
                     if isinstance(issue_result, list):
                         issue_result.sort(key=lambda x: tuple(
                             map(int, x.get("issue").split("/"))))
@@ -72,8 +76,8 @@ if __name__ == "__main__":
                                 print(f" {key:7}: {key_[key]:11}", end=" ")
                             print("\t")
                 except Exception as e:
-                    print(f"Error processing issue_manager request: {
-                          e}, at line {e.__traceback__.tb_lineno}")
+                    logger.error(f"Error processing issue_manager request: {
+                          e}, at line {e.__traceback__.tb_lineno}", exc_info=e)
                     print(f"Usage: python -m {os.path.basename(
                         __file__)} issue_manager list|read|update|create [issue='1/1'] [only_in_state='new,in progress'] [content='json str of an issue update']")
                 sys.exit(0)
@@ -96,7 +100,7 @@ if __name__ == "__main__":
                 test()
                 sys.exit(0)
             case _ as wrong_arg:
-                print(f"{wrong_arg} is not a valid option")
+                logger.warning(f"{wrong_arg} is not a valid option")
 
     print(f"Usage: python -m {os.path.basename(__file__)
                               } [test|update_agents|issue_manager|dir_structure]")

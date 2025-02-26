@@ -395,7 +395,7 @@ pm = {
     "model": "deepseek-r1:14b",
     "description": "Product Manager, responsible for collecting software requirement info, analyzing the fundamental feature of input, process and output, and making sure the software meets the requirement.",
     "temperature": 0.3,
-    "use_tools": True,
+    "use_tools": False,
     "tools": ["issue_manager", "chat_with_other_agent", "get_human_input"],
     "tool_choice": {
         "type": "function",
@@ -505,7 +505,7 @@ async def process_request(request: RequestModel):
 backend_dev = {
     "name": "backend_dev",
     "type": "ollama",
-    "model": "qwen2.5-coder.:14b",
+    "model": "qwen2.5-coder:14b",
     "description": "Senior software developer of Python, responsible for producing fully functioning and tested code based on the software requirements and technical designs provided in the issue#.",
     "temperature": 0.7,
     "use_tools": True,
@@ -557,7 +557,7 @@ Write plain code to minimize dependencies unless absolutely necessary. Discuss w
 frontend_dev = {
     "name": "frontend_dev",
     "type": "ollama",
-    "model": "qwen2.5-coder.:14b",
+    "model": "qwen2.5-coder:14b",
     "description": "Senior frontend software developer, responsible for producing working WebUI front-end code based on the software requirements and technical designs provided in the issue#.",
     "temperature": 0.7,
     "use_tools": True,

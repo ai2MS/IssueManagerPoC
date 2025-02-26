@@ -17,8 +17,6 @@ from .log import logger
 from ..config import config
 
 
-
-
 class Action(Enum):
     """Action Enum for the agent to take."""
     LIST = "list"
@@ -36,7 +34,7 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
     """
     content_obj: dict = {}
     logger.debug("entering...%s",
-                 f"{action=}, {issue=}, {only_in_state=}, {content=})")
+                 f"{action=}, {issue=}, {only_in_state=}, {content=}, {assignee=}, {caller=})")
     if isinstance(content, str):
         try:
             # correct one of the most common json string error - newline instead of \\n in it.
@@ -81,9 +79,11 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                         try:
                             with open(file_path, 'r') as f:
                                 data = json.load(f)
-                            updates = data.get('updates', [])
-                            updates.sort(key=lambda x: x.get('updated_at', 0))
+                            updates: list = data.get('updates', [])
+                            logger.debug("before sorting: %s", updates)
                             if updates:
+                                updates.sort(key=lambda x: x.get('updated_at', ""))
+                                logger.debug("after sorting: %s", updates)
                                 latest_status = [
                                     u for u in updates if u.get('status', "")]
                                 status = latest_status[-1].get(
@@ -162,6 +162,7 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                     last_update.setdefault('assignee', assignee if assignee else
                                            caller if caller else "unknown")
                     last_update.setdefault('status', "new")
+                    last_update.setdefault('details', "create new issue.")
 
                 if not os.path.exists(new_issue_dir):
                     logger.debug("%s issue %s dir does not exist, creating %s ....",
@@ -253,13 +254,13 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                     issue_content = json.load(ifile)
                 if not content:
                     content_obj = {}
-                if content_obj and not hasattr(content_obj, "updated_at"):
+                if "updated_at" not in content_obj:
                     content_obj['updated_at'] = datetime.now().strftime(
                         "%Y-%m-%dT%H:%M:%S.%f")
                 if "updated_by" not in content_obj:
                     content_obj['updated_by'] = caller
                 if "details" not in content_obj:
-                    content_obj['details'] = f"assign {issue} to {assignee}."
+                    content_obj['details'] = f"assign #{issue} to {assignee}."
                 if assignee:
                     agents_dir = os.path.join(os.path.dirname(
                         os.path.dirname(__file__)), "agents")
@@ -278,6 +279,7 @@ def issue_manager(action: str, issue: str = '', only_in_state: list = [],
                     issue_content['updates'].append(content_obj)
                 else:
                     issue_content['updates'] = [content_obj]
+                logger.debug("assigning %s to %s, details: %s", issue, assignee, content_obj)
                 with open(issue_file, 'w') as ifile:
                     json.dump(issue_content, ifile)
                 result = {"issue": issue, "status": "success",
