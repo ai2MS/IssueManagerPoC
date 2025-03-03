@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     PROJECT_NAME: str = "default_project"
     ISSUE_BOARD_DIR: str = "issue_board"
+    INDEX_STORE_PERSIST_DIR: str = "index.store"
     LOG_LEVEL: str = "INFO"
     LOG_LEVEL_CONSOLE: str = "WARNING"
     AZURE_OPENAI_DEPLOYMENT_NAME: str = ''
@@ -15,7 +16,12 @@ class Settings(BaseSettings):
     RETRY_COUNT: int = 3
     DIR_STRUCTURE_YAML: str = PROJECT_NAME + "/dir_structure.yaml"
     OLLAMA_HOST: str = "http://172.17.0.1:11434"  # "http://localhost:11434"
-    OLLAMA_DEFAULT_BASE_MODEL: str = "mistral-nemo"
+    OLLAMA_DEFAULT_BASE_MODEL: str = "deepseek-r1:14b"
+    OLLAMA_EMBEDDING_MODEL: str = "bge-m3"
+    REDIS_HOST: str = "172.17.0.1"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = ""
+    REDIS_USERNAME: str = ""
 
     @field_validator('PROJECT_NAME', 'ISSUE_BOARD_DIR', 'AZURE_OPENAI_DEPLOYMENT_NAME', 'OPENAI_MODEL', 'AZURE_OPENAI_API_KEY', 'OPENAI_API_KEY')
     def validate_alphanumeric_and_underscore(cls, v, field):

@@ -353,6 +353,20 @@ default_project:
 ```
 """
 
+tool_instructions["get_human_input"] = f"""\
+## Function Tool get_human_input usage
+When you need get human to provide additional information, use get_human_input(prompt="what do you want me to do?")
+where prompt will be shown to the human representing what you want them to provide.
+This tool function returns a str contain the text the human input in response to the prompt.
+"""
+
+tool_instructions["chat_with_other_agent"] = f"""\
+## Function Tool chat_with_other_agent usage
+to discuss with other agents, use chat_with_other_agent(agent_name="agent", message="message")
+where agent_name is the str of the name of the agent you want to chat with, 
+and message is the str of the message you want to send to the agent.
+"""
+
 tool_instructions["read_file"] = f"""\
 ## Function Tool read_file usage
 ### to retrieve the content of a file, use read_file(filepath="path/to/file")
@@ -608,7 +622,7 @@ Request a code review from the architect, specifying the issue number and a brie
 Follow these steps diligently to ensure quality and consistency in your development tasks."""
 }
 
-sre ={
+sre = {
     "name": "sre",
     "type": "ollama",
     "model": "gemma2:27b",
@@ -634,7 +648,6 @@ agents["architect"] = architect
 agents["backend_dev"] = backend_dev
 agents["frontend_dev"] = frontend_dev
 agents["sre"] = sre
-
 
 
 def test() -> None:

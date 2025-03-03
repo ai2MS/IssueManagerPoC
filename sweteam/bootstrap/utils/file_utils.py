@@ -13,7 +13,7 @@ def dir_tree(path_: str, return_yaml: bool = False) -> str:
         path - to list
         return_yaml - if True, retrun YAML format
 
-    >>> dir_tree("issue_board", True).split('\\n')[2]
+    >>> dir_tree("issue_board", True) #.split('\\n')[2]
     "    - 1.json: ''"
     """
     def extract_desc(file_path: str) -> str:
@@ -45,8 +45,8 @@ def dir_tree(path_: str, return_yaml: bool = False) -> str:
                 for line in lines:
                     if comment_on_next_line or line.strip().startswith(rule["comment_prefix"]):
                         comment = line.strip().removeprefix(
-                            rule["comment_prefix"]).removesuffix("\n").strip(                                
-                            ).removesuffix(rule["comment_prefix"][::-1]).strip()
+                            rule["comment_prefix"]).removesuffix("\n").strip(
+                        ).removesuffix(rule["comment_prefix"][::-1]).strip()
                         if comment:
                             break
                         else:
@@ -230,3 +230,62 @@ def dir_structure(path: str | dict = {}, action: str = 'read', *, actual_only: b
                              "read|update")
 
     return ""
+
+
+def dir_contains(directory, files: bool = True, dirs: bool = False, recursive: bool = False):
+    """Check if a directory contains files
+    >>> import tempfile, os
+    >>> # Test with an empty directory: should return False.
+    >>> with tempfile.TemporaryDirectory() as tmp:
+    ...     dir_contain(tmp)
+    False
+
+    >>> # Test with a file in the directory: should return True.
+    >>> with tempfile.TemporaryDirectory() as tmp:
+    ...     open(os.path.join(tmp, "file.txt"), "w").close()
+    ...     dir_contain(tmp)
+    True
+
+    >>> # Test with a subdirectory when checking for directories: should return True.
+    >>> with tempfile.TemporaryDirectory() as tmp:
+    ...     os.mkdir(os.path.join(tmp, "subdir"))
+    ...     dir_contain(tmp, files=False, dirs=True)
+    True
+
+    >>> # Test with a nested file not directly in the target directory: without recursion should return False.
+    >>> with tempfile.TemporaryDirectory() as tmp:
+    ...     os.mkdir(os.path.join(tmp, "subdir"))
+    ...     open(os.path.join(tmp, "subdir", "file.txt"), "w").close()
+    ...     dir_contain(tmp)
+    False
+
+    >>> # With recursion enabled, the nested file should be detected.
+    >>> with tempfile.TemporaryDirectory() as tmp:
+    ...     os.mkdir(os.path.join(tmp, "subdir"))
+    ...     open(os.path.join(tmp, "subdir", "file.txt"), "w").close()
+    ...     dir_contain(tmp, recursive=True)
+    True
+    """
+    if not os.path.exists(directory):
+        return False
+    if recursive:
+        for _, dirs_, files_ in os.walk(directory):
+            if dirs and dirs_:
+                return True
+            if files and files_:
+                return True
+        else:
+            return False
+    else:
+        for fd in os.listdir(directory):
+            if files and os.path.isfile(os.path.join(directory, fd)):
+                return True
+            if dirs and os.path.isdir(os.path.join(directory, fd)):
+                return True
+        else:
+            return False
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

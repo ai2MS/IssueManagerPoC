@@ -14,7 +14,7 @@
             },
             "program": "${file}",
             "args": [
-                "-v"
+                //"-v"
             ],
             "console": "integratedTerminal",
             "pythonArgs": [
@@ -37,15 +37,20 @@
             "subProcess": false
         },
         {
-            "name": "Python Debugger: default_project Module",
+            "name": "Python Debugger: Arbitary Module",
             "envFile":"${workspaceFolder}/.env",
             "env": {
                 "PYDEVD_DISABLE_FILE_VALIDATION": "1"
             },
+            "args": [
+                "sweteam.bootstrap.utils.issue_management",
+                "IssueManager.query",
+                "which issue number is most relevant to 'python program that prints hello world'?"
+            ],
             "type": "debugpy",
             "request": "launch",
-            "cwd": "${workspaceFolder}/default_project",
-            "module": "embedded_dev_team",
+            "cwd": "${workspaceFolder}",
+            "module": "sweteam",
             "console": "integratedTerminal",
             "subProcess": false
         }

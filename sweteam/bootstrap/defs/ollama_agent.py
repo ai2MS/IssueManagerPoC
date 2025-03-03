@@ -13,12 +13,10 @@ from . import msg_logger, BaseAgent
 from pydantic import BaseModel
 
 
-
-
 class Ollama_Agent(BaseAgent):
     """
     Ollama_Agent is a specialized agent that interacts with the Ollama LLM client.
-    
+
     This agent is capable of performing tasks, evaluating other agents, and 
     communicating with other agents. It supports the use of tools and maintains 
     a conversation history. The agent can be initialized with a specific configuration 
@@ -38,12 +36,13 @@ class Ollama_Agent(BaseAgent):
         evaluate_agent(agent_name, score, additional_instructions): Evaluates the performance of another agent.
         chat_with_other_agent(agent_name, message, issue): Communicates with another agent.
     """
-    
+
     class TaskResult(BaseModel):
         role: str = 'assistant'
         content: str
         images: List[str] | None = None
         tool_calls: List[Dict[str, str]] | None = None
+        tool_used: List[Dict[str, str]] | None = None
 
     def __init__(self, agent_config: BaseAgent.AgentConfig = {}) -> None:
         # use agent_config
@@ -84,8 +83,8 @@ class Ollama_Agent(BaseAgent):
             # the model name represents an object that is of a certain model type with initial system prompt
             # so the model name in Ollama is not the model type, rather it's an entity that includes system prompt
             response = self.llm_client.create(
-                model=self.name, 
-                from_=self.config.model, system=self.config.instruction, 
+                model=self.name,
+                from_=self.config.model, system=self.config.instruction,
                 parameters={"temperature": self.config.temperature},
                 stream=False)
             self.logger.info("created ollama model %s received %s", self.name, response)
@@ -108,36 +107,58 @@ class Ollama_Agent(BaseAgent):
         """
         return f"<Agent: {self.name}>"
 
-    def messages_append(self, new_message: object, msg_hist_object: list | None = None) -> None:
-        self.messages.append(new_message)
-        while len(json.dumps(msg_hist_object)) > self.config.context_window_size * 1024 * 0.75:
-            del msg_hist_object[0]
-        if msg_hist_object is not None:
-            msg_hist_object.append(new_message)
-            while len(json.dumps(msg_hist_object)) > self.config.context_window_size * 1024 * 0.75:
-                del msg_hist_object[0]
-        
+    class MessageHistory(BaseModel):
+        role: str
+        content: str
 
-    # method to list/read/write issues
+    def messages_append(self, new_message: MessageHistory, msg_hist_object: list[MessageHistory] = []) -> None:
+        def msg_len(msg) -> int:
+            try:
+                return len(json.dumps(msg))
+            except Exception as e:
+                # self.logger.warning("Error calculating message length: %s", e)
+                return len(repr(msg))
 
-    def perform_task(self, task: str = '', from_: str = "Unknown", context: dict = {}, use_history: bool = False) -> TaskResult:
+        if msg_hist_object is self.messages:
+            msg_hist_object = []
+
+        for hist_obj in [self.messages, msg_hist_object]:
+            hist_obj.append(new_message)
+            while msg_len(hist_obj) > self.config.context_window_size * 1024 * 0.75:
+                del hist_obj[0]
+
+    def perform_task(self, task: str = '', from_: str = "Unknown", context: list[MessageHistory] | str = '') -> TaskResult:
+        """Chat with this agent and call tools if the agent asks to do so.
+        Args:
+            task: the prompt describing a task for this agent to perform
+            from_: the name of the party that initiated the task
+            context: the context of the task - can be either a list of historical messages or a string
+                     if a string is provided, it will be added to the context as a user message
+        Returns:
+            TaskResult: the result of the task - it's a structure that is compatible with the LLM message class 
+                        with an added property tool_used that contains the tool calls used by the agent and their return
+        """
         self.__enter__()
         tool_used = []
         response = None
         msg_logger.info("%s >> %s - %s (use tools=%s)",
                         from_, self.name, task, bool(self.tools))
         self.logger.info("%s >> %s - %s (use tools=%s)",
-                            from_, self.name, task, bool(self.tools))
+                         from_, self.name, task, bool(self.tools))
         func_names = [item['function']['name']
-                            for item in self.tools if item['type'] == "function"]
-        
-        if use_history:
-            task_messages = self.messages
+                      for item in self.tools if item['type'] == "function"]
+
+        if context and (isinstance(context, list) and [True for m in context if isinstance(m, self.MessageHistory)]):
+            task_messages = context
+        elif isinstance(context, str):
+            task_messages = [{'role': 'user', 'content': f"Given the following context: {context}"}]
         else:
-            task_messages =[]
-        self.messages_append({'role': 'user', 'content': f"Given the following context: {context}"}, msg_hist_object=task_messages)
-        self.messages_append({'role': 'user', 'content': f"Please do the following: {task}"}, msg_hist_object=task_messages)
-        
+            task_messages = [
+                {'role': 'user', 'content': f"Considering the following structured context: {json.dumps(context)}"}]
+
+        self.messages_append({'role': 'user', 'content': f"Please do the following: {task}"},
+                             msg_hist_object=task_messages)
+
         while self.tools or response is None:
             response = self.llm_client.chat(
                 model=self.name, messages=task_messages, tools=(self.tools if self.config.use_tools else None))
@@ -148,7 +169,7 @@ class Ollama_Agent(BaseAgent):
             # Process function calls made by the model
             if response['message'].get('tool_calls'):
                 self.logger.debug("<%s> The session is trying to use tools: %s",
-                                self.name, response['message']['tool_calls'])
+                                  self.name, response['message']['tool_calls'])
 
                 for tool in response['message']['tool_calls']:
                     arguments = tool['function']['arguments']
@@ -256,7 +277,7 @@ class Ollama_Agent(BaseAgent):
             f"<{self.name}> - chat_with_other_agent({agent_name},{message},{issue})")
         for the_other_agent in [a for a in BaseAgent.instances(True) if a.name == agent_name]:
             chat_result = the_other_agent.perform_task(
-                message, self.name, use_history=True)
+                message, self.name, context=self.messages)
             return f"{agent_name} replied: {chat_result.get('respons')}.  {chat_result.get('tool_use')!r}"
         else:
             raise Exception(f"chat_with_other_agent cannot find agent_name={agent_name}, "
