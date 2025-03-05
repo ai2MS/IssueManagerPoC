@@ -12,9 +12,11 @@ from abc import ABC, abstractmethod
 import os
 import json
 from datetime import datetime
+from pydoc import Doc
 from click import pass_context
-from llama_index.core import VectorStoreIndex, load_index_from_storage, SimpleKeywordTableIndex, KeywordTableIndex, SummaryIndex
-from llama_index.core import SimpleDirectoryReader, StorageContext, Settings
+from llama_index.core import (VectorStoreIndex, load_index_from_storage,
+                              SimpleKeywordTableIndex, KeywordTableIndex, SummaryIndex,
+                              SimpleDirectoryReader, StorageContext, Settings, Document)
 from llama_index.core.node_parser import SentenceSplitter, JSONNodeParser
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.retrievers import QueryFusionRetriever
@@ -49,11 +51,11 @@ Settings.llm = Ollama(model=config.OLLAMA_DEFAULT_BASE_MODEL,
 
 class Source(ABC):
     @abstractmethod
-    def get_all_documents():
+    def get_all_documents() -> list[Document]:
         pass
 
     @abstractmethod
-    def get_all_metadata():
+    def get_all_metadata() -> list:
         pass
 
 
@@ -63,34 +65,65 @@ class Files(Source):
 
     """
 
-    def __init__(self, path_: str):
+    def __init__(self, path_: str, namespace: str = ""):
         self.logger = get_default_logger(self.__class__.__name__)
+        self.namespace = namespace or config.PROJECT_NAME
         self.path = path_
         if not os.path.exists(self.path):
+            self.logger.info("Issue directory does not exist, creating it...")
             os.makedirs(self.path, exist_ok=True)
 
-    def get_all_documents(self):
+    def get_all_documents(self) -> list[str]:
+        """return list of llama-index Document objects with _doc_id, doc_size and updated_at special meta data
+        """
+        documents = []
         if os.path.exists(self.path) and dir_contains(self.path, recursive=True):
             self.logger.info("Issue directory <%s> found, using it...", self.path)
             documents = SimpleDirectoryReader(self.path, recursive=True).load_data()
-        else:
-            self.logger.info("Issue directory does not exist, creating it...")
-            os.makedirs(self.path, exist_ok=True)
-            documents = []
+            for document in documents:
+                if hasattr(document, "metadata"):
+                    file_path = document.metadata["file_path"]
+                    document.metadata[f"{self.namespace}_doc_id"] = file_path
+                    document.metadata["doc_size"] = document.metadata["file_size"]
+                    updated_at = os.stat(file_path).st_mtime
+                    document.metadata["updated_at"] = updated_at
+                else:
+                    self.warning("Document %s does not have metadata, this is strange!", document)
+
+        return documents
+
+    def get_documents(self, document_list: list) -> list[Document]:
+        documents = []
+        if any([os.path.exists(f) for f in document_list]):
+            documents = SimpleDirectoryReader(input_files=document_list)
+            for document in documents:
+                if hasattr(document, "metadata"):
+                    file_path = document.metadata["file_path"]
+                    document.metadata[f"{self.namespace}_doc_id"] = file_path
+                    document.metadata["doc_size"] = document.metadata["file_size"]
+                    updated_at = os.stat(file_path).st_mtime
+                    document.metadata["updated_at"] = updated_at
+                else:
+                    self.warning("Document %s does not have metadata, this is strange!", document)
+
         return documents
 
     def get_all_metadata(self) -> dict:
+        """return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}
+        """
         file_metadata = {}
 
         def scan_dir_populate_metadata(dir_path):
             nonlocal file_metadata
             for entry in os.scandir(dir_path):
                 if entry.is_file():  # Check if it's a file
+                    _doc_id = os.path.abspath(entry.path)
                     metadata = {
-                        "file_size": entry.stat().st_size,
-                        "last_modified_date": entry.stat().st_mtime
+                        f"{self.namespace}_doc_id": _doc_id,
+                        "doc_size": entry.stat().st_size,
+                        "updated_at": entry.stat().st_mtime
                     }
-                    file_metadata[os.path.abspath(entry.path)] = metadata
+                    file_metadata[_doc_id] = metadata
                 elif entry.is_dir():  # Recurse into subdirectories
                     scan_dir_populate_metadata(entry.path)
 
@@ -140,7 +173,7 @@ class IndexStore():
                     nodes.extend(nodes_)
         return nodes
 
-    def connect_to_redis_stores(self):
+    def connect_to_redis_stores(self) -> StorageContext:
         # create the vector store wrapper
         vector_store = RedisVectorStore(redis_client=self.redis_client, overwrite=True,
                                         schema=self.index_schema)
@@ -157,19 +190,18 @@ class IndexStore():
 
         return storage_context
 
-    def create_index(self, documents, force: bool = False):
-        # Check if the index already exists
-        index_exists = False
+    def create_index(self, force: bool = False):
 
         if force is True:
             self.logger.info("force=%s specified, flushing all in Redis", force)
             self.redis_client.execute_command("flushall")
 
+        # Check if the index already exists
         # list existing indexes
         index_list = self.redis_client.execute_command("FT._LIST")
         self.logger.debug("Existing indexes: %s", index_list)
 
-        # if index already in the existing indexes list, check structure compatibility
+        # if vector index already in the existing indexes list, check structure compatibility
         if f"{self.name}.vector".encode('utf-8') in index_list:
             self.logger.info("Index %s.vector already exists, checking compatibility...", self.name)
             # FT.INFO returns a list of key-value pairs if index exists.
@@ -194,7 +226,6 @@ class IndexStore():
             if stored_fields_set == defined_fields_set:
                 self.logger.info("Index %s.vector is compatible with defined schema", self.name)
                 # should check changes and refresh file if needed.
-                index_exists = True
             else:
                 self.logger.warning(
                     "data in the index is imcompatible with defined schema: index_store=%s, instead of %s", stored_fields_set, defined_fields_set)
@@ -202,78 +233,52 @@ class IndexStore():
                 self.redis_client.execute_command("FT.DROPINDEX", f"{self.name}.vector")
                 index_list = self.redis_client.execute_command("FT._LIST")
                 self.logger.info("Index %s.vector dropped. Remaining indexes are:%s", self.name, index_list)
-                index_exists = False
 
+        # since we used redis_client directly manipulate Redis content, let's reconnect:
         self.storage_context = self.connect_to_redis_stores()
 
-        if index_exists:
-            new_documents = self.load_documents()
+        vector_index = VectorStoreIndex.from_vector_store(
+            vector_store=self.storage_context.vector_store
+        )
 
-            vector_index = VectorStoreIndex.from_vector_store(
-                vector_store=self.storage_context.vector_store
+        self.indexes["vector_index"] = vector_index
+        all_nodes = []
+
+        # try load summary index, if fail, create empty one
+        try:
+            # load SummaryIndex from storage
+            summary_index = load_index_from_storage(
+                storage_context=self.storage_context,
+                index_id=self.get_index_id_from_name(f"{self.name}_summary")
             )
-            # Insert new documents to vector_index_store
-            vector_index.insert_nodes(self.docs_to_nodes(new_documents))
-
-            all_nodes = list(self.storage_context.docstore.docs.values())
-
-            # refresh (or fully reload SummaryIndex)
-            try:
-                # load SummaryIndex from storage
-                summary_index = load_index_from_storage(
-                    storage_context=self.storage_context,
-                    index_id=self.get_index_id_from_name(f"{self.name}_summary")
-                )
-                summary_index.refresh_ref_docs(new_documents)
-            except Exception as e:
-                self.logger.warning("Unable to load and refresh summaryindex from storage because of %s", e)
-                # completely rebuild the index
-                summary_index = SummaryIndex(
-                    nodes=all_nodes,
-                    storage_context=self.storage_context
-                )
-                self.set_index_id_name_mapping(f"{self.name}_summary", summary_index.index_id)
-
-            # refresh (or fully reload KeywordTableIndex)
-            try:
-                # load KeywordTableIndex from storage
-                keyword_index = load_index_from_storage(
-                    storage_context=self.storage_context,
-                    index_id=self.get_index_id_from_name(f"{self.name}_keyword")
-                )
-                keyword_index.refresh_ref_docs(new_documents)
-            except Exception as e:
-                self.logger.warning("Unable to load and refresh keywordindex from storage because of %s", e, exc_info=e)
-                # completely rebuild the index
-                keyword_index = SimpleKeywordTableIndex(
-                    nodes=all_nodes,
-                    storage_context=self.storage_context
-                )
-                self.set_index_id_name_mapping(f"{self.name}_keyword", keyword_index.index_id)
-
-        else:
-            # newly created index, so load data and create index.
-            nodes = self.docs_to_nodes(documents)
-            self.storage_context.docstore.add_documents(nodes)
-
-            self.logger.debug("added %s docs to storage context", len(self.storage_context.docstore.docs))
-
-            # build and load index from documents and storage context
-            vector_index = VectorStoreIndex.from_documents(
-                documents, storage_context=self.storage_context
-            )
+            # summary_index.refresh_ref_docs(new_documents)
+        except Exception as e:
+            self.logger.warning("Unable to load and refresh summaryindex from storage because of %s", e)
             # completely rebuild the index
             summary_index = SummaryIndex(
                 nodes=all_nodes,
                 storage_context=self.storage_context
             )
             self.set_index_id_name_mapping(f"{self.name}_summary", summary_index.index_id)
+        self.indexes["summary_index"] = summary_index
 
+        # try load keyword index, if fail, create empty one
+        try:
+            # load KeywordTableIndex from storage
+            keyword_index = load_index_from_storage(
+                storage_context=self.storage_context,
+                index_id=self.get_index_id_from_name(f"{self.name}_keyword")
+            )
+            # keyword_index.refresh_ref_docs(new_documents)
+        except Exception as e:
+            self.logger.warning("Unable to load and refresh keywordindex from storage because of %s", e, exc_info=e)
+            # completely rebuild the index
             keyword_index = SimpleKeywordTableIndex(
                 nodes=all_nodes,
                 storage_context=self.storage_context
             )
             self.set_index_id_name_mapping(f"{self.name}_keyword", keyword_index.index_id)
+        self.indexes["keyword_index"] = keyword_index
 
         # Create retrievers from each index
         summary_retriever = summary_index.as_retriever()
@@ -283,7 +288,7 @@ class IndexStore():
         # Combine retrievers using fusion
         fusion_retriever = QueryFusionRetriever(
             retrievers=[summary_retriever, vector_retriever, keyword_retriever],
-            similarity_top_k=3,  # Number of results from each retriever
+            similarity_top_k=5,  # Number of results from each retriever
             num_queries=1,       # Number of query variations to generate
             mode="simple"        # Can be "simple" or "reciprocal_rank_fusion"
         )
@@ -292,9 +297,10 @@ class IndexStore():
         fusion_query_engine = RetrieverQueryEngine.from_args(
             retriever=fusion_retriever
         )
+
         return fusion_query_engine
 
-    def load_documents(self, force: bool = False):
+    def load_documents(self, document_list: list[str] = [], force: bool = False):
         """Scan the given directory and load the files in it to the self.index doc store
         """
 
@@ -303,16 +309,16 @@ class IndexStore():
             stored_metadata = {}
 
             for node in nodes:
-                # Check if the node has file_path in metadata
-                if hasattr(node, "metadata") and "file_path" in node.metadata:
-                    file_path = node.metadata["file_path"]
-                    file_hash = node.metadata.get("file_hash", "") or node.hash
-                    file_size = node.metadata.get("file_size", "")
-                    file_date = node.metadata.get("last_modified_date", "")
-                    stored_metadata[file_path] = {
-                        "file_size": file_size,
-                        "hash": file_hash,
-                        "last_modified_date": file_date,
+                # Check if the node has _doc_id in metadata
+                if hasattr(node, "metadata") and f"{self.namespace}_doc_id" in node.metadata:
+                    _doc_id = node.metadata[f"{self.namespace}_doc_id"]
+                    doc_hash = node.metadata.get("file_hash", "") or node.hash
+                    doc_size = node.metadata.get("doc_size", -1)
+                    updated_at = node.metadata.get("updated_at", 0)
+                    stored_metadata[_doc_id] = {
+                        "doc_size": doc_size,
+                        "hash": doc_hash,
+                        "updated_at": updated_at,
                         "node_id": node.node_id
                     }
 
@@ -323,69 +329,81 @@ class IndexStore():
         all_nodes = list(self.storage_context.docstore.docs.values())
         self.logger.debug("Found %s nodes in storage", len(all_nodes))
         stored_metadata = extract_stored_document_metadata(all_nodes)
-        self.logger.debug("Found %s documents with file_path metadata", len(stored_metadata))
+        self.logger.debug("Found %s documents with _doc_id metadata", len(stored_metadata))
 
-        files_to_remove = []
-        files_to_add = []
-        for file_path, metadata in file_metadata.items():
+        docs_to_remove = []
+        docs_to_add = []
+        for _doc_id, metadata in file_metadata.items():
             if force:
-                self.logger.debug("force=True specified, adding File %s ...", file_path)
-                files_to_add.append(file_path)
-            elif (file_path not in stored_metadata):
-                self.logger.debug("File %s was not found in the docstore, will be added...", file_path)
-                files_to_add.append(file_path)
-            elif metadata["file_size"] != stored_metadata[file_path]["file_size"]:
-                self.logger.debug("File %s in the docstore is different in size, will be replaced...", file_path)
-                files_to_remove.append(file_path)
-                files_to_add.append(file_path)
-            elif (datetime.fromtimestamp(metadata["last_modified_date"]).strftime("%Y-%m-%d")
-                  != stored_metadata[file_path]["last_modified_date"]):
-                self.logger.debug("File %s mtime and hash do not match docstore, will be replaced...")
-                files_to_remove.append(file_path)
-                files_to_add.append(file_path)
+                self.logger.debug("force=True specified, adding File %s ...", _doc_id)
+                docs_to_add.append(_doc_id)
+            elif (_doc_id not in stored_metadata):
+                self.logger.debug("Source doc %s was not found in the docstore, will be added...", _doc_id)
+                docs_to_add.append(_doc_id)
+            elif metadata["doc_size"] != stored_metadata[_doc_id]["doc_size"]:
+                self.logger.debug("Source doc %s in the docstore is different in size, will be replaced...", _doc_id)
+                docs_to_remove.append(_doc_id)
+                docs_to_add.append(_doc_id)
+            elif (metadata["updated_at"] != stored_metadata[_doc_id]["updated_at"]):
+                self.logger.debug("Source doc %s mtime do not match docstore, will be replaced...")
+                docs_to_remove.append(_doc_id)
+                docs_to_add.append(_doc_id)
             else:
-                # if modified date is the same, or has are the same, then don't process it
-                self.logger.debug("File %s was not changed compare to docstore, skipping", file_path)
+                self.logger.debug("Source doc %s was not changed compare to docstore, skipping", _doc_id)
 
-        for stored_file_path, metadata in stored_metadata.items():
+        for stored__doc_id, metadata in stored_metadata.items():
             if force:
-                self.logger.debug("force=True specified, removing File %s ...", stored_file_path)
-                files_to_remove.append(stored_file_path)
-            elif stored_file_path not in file_metadata:
-                self.logger.debug("force=True specified, removing File %s ...", stored_file_path)
-                files_to_remove.append(stored_file_path)
+                self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
+                docs_to_remove.append(stored__doc_id)
+            elif stored__doc_id not in file_metadata:
+                self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
+                docs_to_remove.append(stored__doc_id)
 
         remove_count = 0
         for node in all_nodes:
             node_id = node.node_id
-            if (hasattr(node, "metadata") and node.metadata.get("file_path") in files_to_remove):
+            if (hasattr(node, "metadata") and node.metadata.get(f"{self.namespace}_doc_id") in docs_to_remove):
                 remove_count += 1
                 del self.storage_context.docstore.docs[node_id]
+                # or
+                # self.storage_context.docstore.delete_document(node_id)
+                # also delete from vector store
                 if hasattr(self.storage_context.vector_store, "delete"):
                     self.storage_context.vector_store.delete(node_id)
+                # and delete from index
         self.logger.debug("Removed %s documents from index", remove_count)
 
         new_documents = []
-        if files_to_add:
-            docreader = SimpleDirectoryReader(input_files=files_to_add)
+        if docs_to_add:
+            docreader = SimpleDirectoryReader(input_files=docs_to_add)
             new_documents = docreader.load_data()
 
-            self.logger.debug("Updated docstore with %s new/modified documents", len(files_to_add))
-        return new_documents
+            self.logger.debug("Updated docstore with %s new/modified documents", len(docs_to_add))
 
-    def __init__(self, source: Source, index_schema: dict | None = None) -> None:
+        # Insert new documents to vector_index_store
+        self.indexes["vector_index"].insert_nodes(self.docs_to_nodes(new_documents))
+        self.indexes["summary_index"].insert_nodes(self.docs_to_nodes(new_documents))
+        self.indexes["keyword_index"].insert_nodes(self.docs_to_nodes(new_documents))
+
+        return None
+
+    def __init__(self, source: Source, index_schema: dict | None = None,
+                 namespace: str = "", reset: bool = False) -> None:
         self.logger = get_default_logger(self.__class__.__name__)
+        self.namespace = namespace or config.PROJECT_NAME
         self.index_schema = index_schema
         if (not hasattr(self, "name")):
             # incase inherited instance did not define name
             if "index" in index_schema:
-                # if index_schema has ["index"]["name"], use as self.name
-                self.name = index_schema["index"].get("name", "default").removesuffix(".vector")
+                # if index_schema has ["index"]["name"], use it as self.name, or use self.namespace as self.name
+                self.name = index_schema["index"].get("name", self.namespace).removesuffix(".vector")
             else:
                 # otherwise use "default"
-                self.name = self.__class__.__name__
+                self.name = f"{self.namespace}:{self.__class__.__name__}"
 
         self.source = source
+
+        self.indexes = {str: SummaryIndex | KeywordTableIndex | VectorStoreIndex}
 
         # Redis client is needed to perform other activities like cleaning up
         self.logger.debug("creating Redis client... %s:%s", config.REDIS_HOST, config.REDIS_PORT)
@@ -399,11 +417,11 @@ class IndexStore():
         self.logger.debug("Redis client created: %s", self.redis_client.ping())
 
         try:
-            # self.storage_context = StorageContext.from_defaults(persist_dir=self.persist_dir)
+
             if f"{self.name}.vector".encode('utf-8') not in self.redis_client.execute_command("FT._LIST"):
                 raise IndexError("Vector Index not found in Redis")
-            redis_keys = self.redis_client.execute_command("keys", f"{self.name}*")
 
+            redis_keys = self.redis_client.execute_command("keys", f"{self.name}*")
             for store_type in ["doc", "index"]:
                 if f"{self.name}.{store_type}".encode('utf-8') not in redis_keys:
                     raise IndexError(f"{store_type} store is not found in Redis")
@@ -411,16 +429,18 @@ class IndexStore():
             # if all 3 stores are found to be in Redis already:
             self.storage_context = self.connect_to_redis_stores()
 
-            vector_index = VectorStoreIndex.from_vector_store(
+            self.indexes["vector_index"] = VectorStoreIndex.from_vector_store(
                 vector_store=self.storage_context.vector_store
             )
-            summary_index = load_index_from_storage(self.storage_context, index_id=f"{self.name}_summary")
-            keyword_index = load_index_from_storage(self.storage_context, index_id=f"{self.name}_keyword")
+            self.indexes["summary_index"] = load_index_from_storage(
+                self.storage_context, index_id=f"{self.name}_summary")
+            self.indexes["keyword_index"] = load_index_from_storage(
+                self.storage_context, index_id=f"{self.name}_keyword")
 
             # Create retrievers from each index
-            summary_retriever = summary_index.as_retriever()
-            vector_retriever = vector_index.as_retriever()
-            keyword_retriever = keyword_index.as_retriever()
+            summary_retriever = self.indexes["summary_index"].as_retriever()
+            vector_retriever = self.indexes["vector_index"].as_retriever()
+            keyword_retriever = self.indexes["keyword_index"].as_retriever()
 
             # Combine retrievers using fusion
             fusion_retriever = QueryFusionRetriever(
@@ -431,15 +451,18 @@ class IndexStore():
             )
 
             # Create a query engine from the fusion retriever
-            fusion_query_engine = RetrieverQueryEngine.from_args(
+            self.query_engine = RetrieverQueryEngine.from_args(
                 retriever=fusion_retriever
             )
 
         except Exception:
-            # if storage_context can't be loaded from disk, call create_index() to build it.
-            self.query_engine = self.create_index(source.get_all_documents())
+            # if storage_context can't be loaded from storage, call create_index() to build it.
+            self.query_engine = self.create_index(force=(reset is True))
 
         self.logger.debug(f"initialized Issue Index Vector Store...")
+
+        self.load_documents(source.get_all_documents(), force=reset)
+        self.logger.debug("Loaded / refreshed documents for all indexes")
 
         # self.persist_dir = persist_dir or os.path.join(config.INDEX_STORE_PERSIST_DIR, self.name)
         self.storage_context.persist()
@@ -449,7 +472,7 @@ class IndexStore():
 
         response = self.query_engine.query(question)
 
-        self.logger.debug(f"answered query '{question}'")
+        self.logger.debug("answered query '%s' with '%s'", question, response)
         return response
 
     def refresh(self) -> str:

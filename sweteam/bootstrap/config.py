@@ -5,6 +5,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     PROJECT_NAME: str = "default_project"
     ISSUE_BOARD_DIR: str = "issue_board"
+    JIRA_BASE_URL: str = ""
+    JIRA_USERNAME: str = ""
+    JIRA_API_KEY: str = ""
     INDEX_STORE_PERSIST_DIR: str = "index.store"
     LOG_LEVEL: str = "INFO"
     LOG_LEVEL_CONSOLE: str = "WARNING"

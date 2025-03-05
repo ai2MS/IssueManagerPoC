@@ -232,7 +232,7 @@ def dir_structure(path: str | dict = {}, action: str = 'read', *, actual_only: b
     return ""
 
 
-def dir_contains(directory, files: bool = True, dirs: bool = False, recursive: bool = False):
+def dir_contains(directory, files: bool = True, dirs: bool = False, pattern: str = '.*', recursive: bool = False):
     """Check if a directory contains files
     >>> import tempfile, os
     >>> # Test with an empty directory: should return False.
@@ -268,22 +268,23 @@ def dir_contains(directory, files: bool = True, dirs: bool = False, recursive: b
     """
     if not os.path.exists(directory):
         return False
+    regex = re.compile(pattern)
     if recursive:
         for _, dirs_, files_ in os.walk(directory):
-            if dirs and dirs_:
+            if dirs and dirs_ and any(regex.match(s) for s in dirs_):
                 return True
-            if files and files_:
+            if files and files_ and any(regex.match(s) for s in files_):
                 return True
-        else:
-            return False
     else:
         for fd in os.listdir(directory):
-            if files and os.path.isfile(os.path.join(directory, fd)):
+            if (files and any(regex.match(s) for s in dirs_)
+                    and os.path.isfile(os.path.join(directory, fd))):
                 return True
-            if dirs and os.path.isdir(os.path.join(directory, fd)):
+            if (dirs and any(regex.match(s) for s in dirs_)
+                    and os.path.isdir(os.path.join(directory, fd))):
                 return True
-        else:
-            return False
+
+    return False
 
 
 if __name__ == "__main__":
