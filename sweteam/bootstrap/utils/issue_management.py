@@ -16,7 +16,7 @@ from tracemalloc import stop
 from idna import decode
 from redisvl.schema import IndexSchema
 
-from sweteam.bootstrap.utils.log import get_default_logger
+from .log import get_default_logger
 
 from ..config import config
 
@@ -26,24 +26,50 @@ from .doc_indexes import (embedding_dim, Source, Files, IndexStore, Document)
 class JIRA(Source):
     def __init__(self):
         self.logger = get_default_logger(self.__class__.__name__)
+        self.namespace = f"{config.PROJECT_NAME}_Jira"
         self.auth = HTTPBasicAuth(config.JIRA_USERNAME, config.JIRA_API_KEY)
         self.base_url = config.JIRA_BASE_URL
+        self.issues_to_reconcile = []
 
     def get_all_documents(self) -> list[Document]:
         documents = []
         issue_list = self.list_issues()
         jira_batch_size = 10
-        for pnt in range(0, len(issue_list), jira_batch_size):
-            issue_list_batch = issue_list[pnt:jira_batch_size]
-            document_batch = self.retrieve_issues(issue_list=issue_list_batch)
+        for batch_begin in range(0, len(issue_list), jira_batch_size):
+            issue_list_batch = issue_list[batch_begin:batch_begin+jira_batch_size]
+            issue_batch = self.retrieve_issues(issue_list=issue_list_batch)
+            document_batch = []
+            for issue in issue_batch:
+                issue_json = {"doc_id": f"{issue['id']}", "extra_info": issue, "text": issue['description']}
+                issue_document = Document(text=issue_json)
+                document_batch.append(issue_document)
             documents.extend(document_batch)
 
         return documents
 
-    def get_all_metadata():
-        pass
+    def get_all_metadata(self):
+        issue_list = self.list_issues(jql='created >= startOfDay("-30d") ORDER BY created DESC')
+        issue_dict = {}
+        for issue in issue_list:
+            issue_dict[issue[f"{self.namespace}_doc_id"]] = issue
+        return issue_dict
 
-    def list_issues(self, jql: str = 'project = KSM'):
+    def list_issues(self, jql: str = 'created >= startOfDay("-3d") ORDER BY created DESC', force: bool = False):
+        """return list of issue ids by jsql query
+        Args:
+            jql: the query to run, default value is issues created in the past 3 days DESC
+            force: if force a reconcile, default is False, which means won't force reconcil, 
+                   so some recently updated issues may not have their most recent updates included
+        Returns:
+            list of issue ids
+        """
+        if force:
+            # to be implemented by leveraging Jira webhook that listen to issue change events
+            # then, the list of issue ids that are changed will be included in the reconcileIssues list.
+            reconcileIssues = self.issues_to_reconcile
+        else:
+            reconcileIssues = []
+
         returned_issues = []
 
         url = f"{self.base_url}/search/jql"
@@ -54,13 +80,14 @@ class JIRA(Source):
         maxResults = 500
         fields = "*navigable"
         nextPageToken = None
-        reconcileIssues = []
 
         while True:
             query = {
                 'jql': jql,
                 'nextPageToken': nextPageToken,
-                'maxResults': maxResults
+                'fields': 'id,key,updated',
+                'maxResults': maxResults,
+                'reconcileIssues': reconcileIssues
             }
 
             response = requests.request(
@@ -76,7 +103,10 @@ class JIRA(Source):
                 self.logger.warning("Jira jql response run into %s converting to JSON: %s", e,  response)
                 result = {}
 
-            returned_issues.extend([d["id"] for d in result.get("issues", [])])
+            issues_w_metadata = [{f'{self.namespace}_doc_id': d["id"],
+                                  'updated_at': d["fields"]["updated"],
+                                  'key': d["key"]} for d in result.get("issues", [])]
+            returned_issues.extend(issues_w_metadata)
             if (nextPageToken := result.get("nextPageToken", None)) is None:
                 # Last page will return null as nextPageToken
                 break
@@ -112,7 +142,20 @@ class JIRA(Source):
         )
 
         returned_issues = json.loads(response.text).get("issues", [])
-        return returned_issues
+        issues_to_return = []
+        for ri in returned_issues:
+            # del ri["expand"]
+            issue_temp = {"id": ri["id"],
+                          "key": ri["key"],
+                          "customfields": {}}
+            for f in ri["fields"]:
+                if f.startswith("customfield"):
+                    issue_temp["customfields"][f] = (ri["fields"][f])
+                else:
+                    issue_temp[f] = ri["fields"][f]
+
+            issues_to_return.append(issue_temp)
+        return issues_to_return
 
 
 class IssueManager(IndexStore):
@@ -160,10 +203,11 @@ class IssueManager(IndexStore):
                 ],
             }
         )
-        issue_dir = os.path.join(config.PROJECT_NAME, config.ISSUE_BOARD_DIR)
-        issue_dir = os.path.join(config.PROJECT_NAME, "Jira.jsons", "subset")
-        issue_files = Files(issue_dir)
-        super().__init__(issue_files, issue_index_schema)
+        # issue_dir = os.path.join(config.PROJECT_NAME, config.ISSUE_BOARD_DIR)
+        # issue_dir = os.path.join(config.PROJECT_NAME, "Jira.jsons", "subset")
+        # issue_files = Files(issue_dir)
+        jira_issues = JIRA()
+        super().__init__(jira_issues, issue_index_schema)
 
     def create(self):
         pass

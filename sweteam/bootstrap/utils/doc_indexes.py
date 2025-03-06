@@ -300,7 +300,7 @@ class IndexStore():
 
         return fusion_query_engine
 
-    def load_documents(self, document_list: list[str] = [], force: bool = False):
+    def load_documents(self, document_list: list[Document] = [], force: bool = False):
         """Scan the given directory and load the files in it to the self.index doc store
         """
 
@@ -324,7 +324,7 @@ class IndexStore():
 
             return stored_metadata
 
-        file_metadata: dict = self.source.get_all_metadata()
+        source_docs_metadata: dict = self.source.get_all_metadata()
 
         all_nodes = list(self.storage_context.docstore.docs.values())
         self.logger.debug("Found %s nodes in storage", len(all_nodes))
@@ -333,7 +333,7 @@ class IndexStore():
 
         docs_to_remove = []
         docs_to_add = []
-        for _doc_id, metadata in file_metadata.items():
+        for _doc_id, metadata in source_docs_metadata.items():
             if force:
                 self.logger.debug("force=True specified, adding File %s ...", _doc_id)
                 docs_to_add.append(_doc_id)
@@ -355,7 +355,7 @@ class IndexStore():
             if force:
                 self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
                 docs_to_remove.append(stored__doc_id)
-            elif stored__doc_id not in file_metadata:
+            elif stored__doc_id not in source_docs_metadata:
                 self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
                 docs_to_remove.append(stored__doc_id)
 
@@ -375,8 +375,11 @@ class IndexStore():
 
         new_documents = []
         if docs_to_add:
-            docreader = SimpleDirectoryReader(input_files=docs_to_add)
-            new_documents = docreader.load_data()
+            ############ need to fix: this shoudl not read doc from file
+            # this needs to be converting a text to a document  
+            # ############
+            
+            new_documents = [d for d in document_list if d[f"{self.namespace}_doc_id"] in docs_to_add]
 
             self.logger.debug("Updated docstore with %s new/modified documents", len(docs_to_add))
 
