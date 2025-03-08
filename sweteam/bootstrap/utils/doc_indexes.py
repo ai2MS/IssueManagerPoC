@@ -11,6 +11,7 @@ index for querying the issues. The index is created from the documents in the is
 from abc import ABC, abstractmethod
 import os
 import json
+import hashlib
 from datetime import datetime
 from pydoc import Doc
 from click import pass_context
@@ -52,10 +53,24 @@ Settings.llm = Ollama(model=config.OLLAMA_DEFAULT_BASE_MODEL,
 class Source(ABC):
     @abstractmethod
     def get_all_documents() -> list[Document]:
+        """Returns all the documents as whole as a list
+        """
         pass
 
     @abstractmethod
     def get_all_metadata() -> list:
+        """The metadata of each document (i.e. an issue, or a file) should
+        be sufficient to identify if the document has changed without having to go 
+        through the full cycle of retrieving the full document from the source.
+        This is used to provide a document list, and/or compare if a document needs to be refreshed
+        """
+        pass
+
+    @abstractmethod
+    def get_documents() -> list[Document]:
+        """Retrieve a group of specified documents
+        The parameter is a list of document ids
+        ß"""
         pass
 
 
@@ -68,10 +83,34 @@ class Files(Source):
     def __init__(self, path_: str, namespace: str = ""):
         self.logger = get_default_logger(self.__class__.__name__)
         self.namespace = namespace or config.PROJECT_NAME
-        self.path = path_
+        self.path = os.path.abspath(path_) + "/"
         if not os.path.exists(self.path):
             self.logger.info("Issue directory does not exist, creating it...")
             os.makedirs(self.path, exist_ok=True)
+
+    def get_file_hash(self, file_path: str, algorithm: str = 'sha256', buffer_size: int = 65536) -> str:
+        """
+        Calculate the hash of a file efficiently using buffered reading.
+
+        Args:
+            file_path (str): Path to the file
+            algorithm (str): Hash algorithm to use ('md5', 'sha1', 'sha256', etc.)
+            buffer_size (int): Size of chunks to read at once
+
+        Returns:
+            FileInfo: where hash: Hexadecimal digest of the file hash and 
+                            title: short description of the file content
+        """
+        hash_func = hashlib.new(algorithm)
+
+        with open(file_path, 'rb') as f:
+            while True:
+                data = f.read(buffer_size)
+                if not data:
+                    break
+                hash_func.update(data)
+
+        return hash_func.hexdigest()
 
     def get_all_documents(self) -> list[str]:
         """return list of llama-index Document objects with _doc_id, doc_size and updated_at special meta data
@@ -83,26 +122,46 @@ class Files(Source):
             for document in documents:
                 if hasattr(document, "metadata"):
                     file_path = document.metadata["file_path"]
-                    document.metadata[f"{self.namespace}_doc_id"] = file_path
-                    document.metadata["doc_size"] = document.metadata["file_size"]
-                    updated_at = os.stat(file_path).st_mtime
-                    document.metadata["updated_at"] = updated_at
+                    metadata = {
+                        "_doc_id": file_path.removeprefix(self.path),
+                        "_doc_size": document.metadata["file_size"],
+                        "_doc_created_at": os.stat(file_path).st_ctime,
+                        "_doc_updated_at": os.stat(file_path).st_mtime,
+                        "_doc_hash": self.get_file_hash(file_path)
+                    }
+                    for k, v in metadata.items():
+                        document.metadata[f"{config.PROJECT_NAME}{k}"] = v
+
                 else:
                     self.warning("Document %s does not have metadata, this is strange!", document)
 
         return documents
 
-    def get_documents(self, document_list: list) -> list[Document]:
+    def get_documents(self, doc_id_list: list) -> list[Document]:
         documents = []
-        if any([os.path.exists(f) for f in document_list]):
-            documents = SimpleDirectoryReader(input_files=document_list)
+        doc_path_list = [os.path.join(self.path, id) for id in doc_id_list]
+        if any([os.path.exists(f) for f in doc_path_list]):
+            documents = SimpleDirectoryReader(input_files=doc_path_list).load_data()
             for document in documents:
                 if hasattr(document, "metadata"):
                     file_path = document.metadata["file_path"]
-                    document.metadata[f"{self.namespace}_doc_id"] = file_path
-                    document.metadata["doc_size"] = document.metadata["file_size"]
-                    updated_at = os.stat(file_path).st_mtime
-                    document.metadata["updated_at"] = updated_at
+                    metadata = {
+                        "_doc_id": file_path.removeprefix(self.path),
+                        "_doc_size": document.metadata["file_size"],
+                        "_doc_created_at": os.stat(file_path).st_ctime,
+                        "_doc_updated_at": os.stat(file_path).st_mtime,
+                        "_doc_hash": self.get_file_hash(file_path)
+                    }
+                    try:
+                        file_content = json.loads(document.text)
+                    except Exception as e:
+                        self.logger.warning("File %s content is not valid json", file_path)
+                        file_content = {}
+
+                    metadata["_doc_title"] = file_content.get("title") or file_content.get("Summary")
+                    for k, v in metadata.items():
+                        document.metadata[f"{config.PROJECT_NAME}{k}"] = v
+
                 else:
                     self.warning("Document %s does not have metadata, this is strange!", document)
 
@@ -117,11 +176,14 @@ class Files(Source):
             nonlocal file_metadata
             for entry in os.scandir(dir_path):
                 if entry.is_file():  # Check if it's a file
-                    _doc_id = os.path.abspath(entry.path)
+                    file_path = os.path.abspath(entry.path)
+                    _doc_id = file_path.removeprefix(dir_path)
                     metadata = {
-                        f"{self.namespace}_doc_id": _doc_id,
-                        "doc_size": entry.stat().st_size,
-                        "updated_at": entry.stat().st_mtime
+                        f"{config.PROJECT_NAME}_doc_id": _doc_id,
+                        f"{config.PROJECT_NAME}_doc_size": entry.stat().st_size,
+                        f"{config.PROJECT_NAME}_doc_created_at": entry.stat().st_ctime,
+                        f"{config.PROJECT_NAME}_doc_updated_at": entry.stat().st_mtime,
+                        f"{config.PROJECT_NAME}_doc_hash": self.get_file_hash(file_path)
                     }
                     file_metadata[_doc_id] = metadata
                 elif entry.is_dir():  # Recurse into subdirectories
@@ -253,7 +315,8 @@ class IndexStore():
             )
             # summary_index.refresh_ref_docs(new_documents)
         except Exception as e:
-            self.logger.warning("Unable to load and refresh summaryindex from storage because of %s", e)
+            self.logger.warning(
+                "Unable to load and refresh summaryindex from storage, will re-create. Error detail: %s ", e)
             # completely rebuild the index
             summary_index = SummaryIndex(
                 nodes=all_nodes,
@@ -271,7 +334,8 @@ class IndexStore():
             )
             # keyword_index.refresh_ref_docs(new_documents)
         except Exception as e:
-            self.logger.warning("Unable to load and refresh keywordindex from storage because of %s", e, exc_info=e)
+            self.logger.warning(
+                "Unable to load and refresh keywordindex from storage, will re-create. Error detail: %s", e, exc_info=e)
             # completely rebuild the index
             keyword_index = SimpleKeywordTableIndex(
                 nodes=all_nodes,
@@ -305,31 +369,35 @@ class IndexStore():
         """
 
         def extract_stored_document_metadata(nodes) -> dict[str: dict]:
-            """Extract metadata from stored document nodes."""
+            """Extract metadata from stored document nodes.
+            Args:
+                nodes: list of llama-index Document nodes
+            Returns:
+                dict[node_id: {metadata k:v}]
+            """
             stored_metadata = {}
 
             for node in nodes:
                 # Check if the node has _doc_id in metadata
-                if hasattr(node, "metadata") and f"{self.namespace}_doc_id" in node.metadata:
-                    _doc_id = node.metadata[f"{self.namespace}_doc_id"]
-                    doc_hash = node.metadata.get("file_hash", "") or node.hash
-                    doc_size = node.metadata.get("doc_size", -1)
-                    updated_at = node.metadata.get("updated_at", 0)
-                    stored_metadata[_doc_id] = {
-                        "doc_size": doc_size,
-                        "hash": doc_hash,
-                        "updated_at": updated_at,
-                        "node_id": node.node_id
-                    }
+                if hasattr(node, "metadata") and f"{config.PROJECT_NAME}_doc_id" in node.metadata:
+                    _doc_id = node.doc_id if hasattr(node, 'doc_id') else node.metadata[f"{config.PROJECT_NAME}_doc_id"]
+                    node_id = node.node_id if hasattr(node, 'node_id') else _doc_id
+                    n_metadata = {}
+                    for k, v in node["metadata"]:
+                        # extract only metadata that starts with project_name
+                        if k.startswith(f"{config.PROJECT_NAME}_"):
+                            n_metadata[k] = v
+                    stored_metadata[node_id] = n_metadata
 
             return stored_metadata
-
-        source_docs_metadata: dict = self.source.get_all_metadata()
 
         all_nodes = list(self.storage_context.docstore.docs.values())
         self.logger.debug("Found %s nodes in storage", len(all_nodes))
         stored_metadata = extract_stored_document_metadata(all_nodes)
         self.logger.debug("Found %s documents with _doc_id metadata", len(stored_metadata))
+
+        # get metadata from the source
+        source_docs_metadata: dict = self.source.get_all_metadata()
 
         docs_to_remove = []
         docs_to_add = []
@@ -337,21 +405,19 @@ class IndexStore():
             if force:
                 self.logger.debug("force=True specified, adding File %s ...", _doc_id)
                 docs_to_add.append(_doc_id)
-            elif (_doc_id not in stored_metadata):
+            elif ((matching_docs_metadata := [v for k, v in stored_metadata.items() if k == _doc_id
+                                              or v[f"{config.PROJECT_NAME}_doc_id"]])):
                 self.logger.debug("Source doc %s was not found in the docstore, will be added...", _doc_id)
                 docs_to_add.append(_doc_id)
-            elif metadata["doc_size"] != stored_metadata[_doc_id]["doc_size"]:
-                self.logger.debug("Source doc %s in the docstore is different in size, will be replaced...", _doc_id)
-                docs_to_remove.append(_doc_id)
-                docs_to_add.append(_doc_id)
-            elif (metadata["updated_at"] != stored_metadata[_doc_id]["updated_at"]):
-                self.logger.debug("Source doc %s mtime do not match docstore, will be replaced...")
+            elif metadata in matching_docs_metadata:
+                self.logger.debug("Source doc %s metadata do not match docstore, will be replaced... "
+                                  "Source metadata: %s; Stored metadata list: %s", _doc_id, metadata, matching_docs_metadata)
                 docs_to_remove.append(_doc_id)
                 docs_to_add.append(_doc_id)
             else:
                 self.logger.debug("Source doc %s was not changed compare to docstore, skipping", _doc_id)
 
-        for stored__doc_id, metadata in stored_metadata.items():
+        for stored__doc_id, metadata in [(v[f"{config.PROJECT_NAME}_doc_id"], v) for k, v in stored_metadata.items()]:
             if force:
                 self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
                 docs_to_remove.append(stored__doc_id)
@@ -362,7 +428,7 @@ class IndexStore():
         remove_count = 0
         for node in all_nodes:
             node_id = node.node_id
-            if (hasattr(node, "metadata") and node.metadata.get(f"{self.namespace}_doc_id") in docs_to_remove):
+            if (hasattr(node, "metadata") and node.metadata.get(f"{config.PROJECT_NAME}_doc_id") in docs_to_remove):
                 remove_count += 1
                 del self.storage_context.docstore.docs[node_id]
                 # or
@@ -375,11 +441,11 @@ class IndexStore():
 
         new_documents = []
         if docs_to_add:
-            ############ need to fix: this shoudl not read doc from file
-            # this needs to be converting a text to a document  
+            # need to fix: this shoudl not read doc from file
+            # this needs to be converting a text to a document
             # ############
-            
-            new_documents = [d for d in document_list if d[f"{self.namespace}_doc_id"] in docs_to_add]
+
+            new_documents = [d for d in document_list if d.metadata[f"{config.PROJECT_NAME}"]["_doc_id"] in docs_to_add]
 
             self.logger.debug("Updated docstore with %s new/modified documents", len(docs_to_add))
 

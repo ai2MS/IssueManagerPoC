@@ -10,7 +10,12 @@ import json
 from typing import List, Optional
 from datetime import datetime
 
+from sweteam.bootstrap.utils.log import get_default_logger
+
 from .utils.issue_management import IssueManager
+from .config import config
+
+logger = get_default_logger(__name__)
 
 app = FastAPI()
 
@@ -89,9 +94,13 @@ async def get_issue_chat_page(request: Request):
         200
     """
     issues = issue_manager.source.get_all_metadata()
+    issues_list = []
+    for k, v in issues.items():
+        issues_list.append({'id': v.get(f"{config.PROJECT_NAME}_doc_id", k),
+                            'title': (v.get('title') or v.get('Summary') or v.get("Description", ""))[:80]})
     return templates.TemplateResponse(
         "issue_chat.html",
-        {"request": request, "issues": issues}
+        {"request": request, "issues": issues_list}
     )
 
 
@@ -115,13 +124,20 @@ async def get_issue(issue_id: str):
         >>> response.json()["id"]
         'ISSUE-1'
     """
-    # In a real implementation, you would fetch the issue from the IssueManager
-    # For now, we'll use sample data
-    for issue in SAMPLE_ISSUES:
-        if issue["id"] == issue_id:
+    try:
+        found_issues = issue_manager.source.get_documents([issue_id])
+        if found_issues:
+            found_issue = found_issues[0]
+            issue = {}
+            issue["id"] = issue_id
+            issue["title"] = getattr(found_issue, "title", "no title")
+            issue["created"] = getattr(found_issue, f"{config.PROJECT_NAME}_doc_created_at", "unknown")
+            issue["status"] = getattr(found_issue, f"status", "unknown")
+            issue["description"] = getattr(found_issue, f"description", "") or getattr(found_issue, f"text", "n/a")
             return issue
-
-    return {"error": "Issue not found"}, 404
+    except Exception as e:
+        logger.warning("Error retrieving document %s from the source, due to %s", issue_id, e, exc_info=e)
+        return {"error": "Issue not found"}, 404
 
 
 @app.post("/api/chat")
@@ -149,19 +165,11 @@ async def chat(message: ChatMessage):
 
     try:
         # Get the issue details
-        issue = None
-        for i in SAMPLE_ISSUES:
-            if i["id"] == message.issue_id:
-                issue = i
-                break
-
-        if not issue:
-            return {"response": "I couldn't find information about this issue."}
 
         # Use the IssueManager to query for a response
         # This is a simplified example - in a real implementation, you would
         # use the issue details and the message to generate a more contextual response
-        query = f"Regarding issue {message.issue_id} ({issue['title']}): {message.message}"
+        query = f"Regarding issue {message.issue_id}: {message.message}"
 
         # Try to use the issue_manager to get a response
         try:
@@ -169,17 +177,17 @@ async def chat(message: ChatMessage):
             ai_response = str(response.response)
         except Exception as e:
             # Fallback to a simple response if the query fails
-            print(f"Error querying issue manager: {e}")
+            ai_response = (f"I run into error querying issue manager: {e}")
 
             # Generate a simple response based on the issue details
-            if "status" in message.message.lower():
-                ai_response = f"The current status of this issue is: {issue['status']}"
-            elif "description" in message.message.lower() or "about" in message.message.lower():
-                ai_response = f"This issue is about: {issue['description']}"
-            elif "comment" in message.message.lower():
-                ai_response = f"There are {len(issue['comments'])} comments on this issue."
-            else:
-                ai_response = f"I'm analyzing issue {issue['id']}: {issue['title']}. It's currently {issue['status']} and was created on {issue['created']}. How can I help you with this issue?"
+            # if "status" in message.message.lower():
+            #     ai_response = f"The current status of this issue is: {issue['status']}"
+            # elif "description" in message.message.lower() or "about" in message.message.lower():
+            #     ai_response = f"This issue is about: {issue['description']}"
+            # elif "comment" in message.message.lower():
+            #     ai_response = f"There are {len(issue['comments'])} comments on this issue."
+            # else:
+            #     ai_response = f"I'm analyzing issue {issue['id']}: {issue['title']}. It's currently {issue['status']} and was created on {issue['created']}. How can I help you with this issue?"
 
         return {"response": ai_response}
 
@@ -207,7 +215,19 @@ async def list_issues():
     """
     # In a real implementation, you would fetch issues from the IssueManager
     # For now, we'll use sample data
-    return SAMPLE_ISSUES
+    issues = issue_manager.source.get_all_metadata()
+    issues_list = []
+    for k, v in issues.items():
+        issues_list.append({'id': v.get(f"{config.PROJECT_NAME}_doc_id", k),
+                            'title': (v.get('title') or v.get('Summary') or v.get("Description", ""))[:80]})
+    return issues_list
+
+
+def main():
+    print("Starting Issue Management Assistant server...")
+    print("Access the web interface at http://localhost:8000")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 if __name__ == "__main__":
     if "--test" in sys.argv:
@@ -215,6 +235,5 @@ if __name__ == "__main__":
         import doctest
         doctest.testmod()
     else:
-        print("Starting Issue Management Assistant server...")
-        print("Access the web interface at http://localhost:8000")
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        pass
+        # main()

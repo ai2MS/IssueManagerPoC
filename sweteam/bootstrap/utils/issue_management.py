@@ -31,27 +31,58 @@ class JIRA(Source):
         self.base_url = config.JIRA_BASE_URL
         self.issues_to_reconcile = []
 
-    def get_all_documents(self) -> list[Document]:
+    def get_all_documents(self, doc_id_field_name: str = "id") -> list[Document]:
         documents = []
-        issue_list = self.list_issues()
+        issue_list = [i for i in self.list_issues()]
         jira_batch_size = 10
         for batch_begin in range(0, len(issue_list), jira_batch_size):
             issue_list_batch = issue_list[batch_begin:batch_begin+jira_batch_size]
             issue_batch = self.retrieve_issues(issue_list=issue_list_batch)
             document_batch = []
             for issue in issue_batch:
-                issue_json = {"doc_id": f"{issue['id']}", "extra_info": issue, "text": issue['description']}
+                issue_json = {f"doc_id": f"{issue[doc_id_field_name]}",
+                              "extra_info": issue, "text": issue['description']}
                 issue_document = Document(text=issue_json)
+                issue_document.metadata[f"{config.PROJECT_NAME}_doc_id"] = f"{issue[doc_id_field_name]}"
+                issue_document.metadata["doc_size"] = len(issue)
+                issue_document.metadata["updated_at"] = issue['updated']
                 document_batch.append(issue_document)
             documents.extend(document_batch)
 
         return documents
 
-    def get_all_metadata(self):
+    def get_documents(self, doc_id_list: list = [], doc_id_field_name: str = "id") -> list[Document]:
+        documents = []
+        issue_list = doc_id_list
+        jira_batch_size = 10
+        for batch_begin in range(0, len(issue_list), jira_batch_size):
+            issue_list_batch = issue_list[batch_begin:batch_begin+jira_batch_size]
+            issue_batch = self.retrieve_issues(issue_list=issue_list_batch)
+            document_batch = []
+            for issue in issue_batch:
+                issue_json = {f"doc_id": f"{issue[doc_id_field_name]}",
+                              "extra_info": issue, "text": issue['description']}
+                issue_document = Document(text=issue_json)
+                issue_document.metadata[f"{config.PROJECT_NAME}_doc_id"] = f"{issue[doc_id_field_name]}"
+                issue_document.metadata["doc_size"] = len(issue)
+                issue_document.metadata["updated_at"] = issue['updated']
+                document_batch.append(issue_document)
+            documents.extend(document_batch)
+
+        return documents
+
+    def get_all_metadata(self) -> dict:
         issue_list = self.list_issues(jql='created >= startOfDay("-30d") ORDER BY created DESC')
         issue_dict = {}
         for issue in issue_list:
-            issue_dict[issue[f"{self.namespace}_doc_id"]] = issue
+            _doc_id= issue.get("id") or issue.get("doc_id") or issue[f"{config.PROJECT_NAME}_doc_id"]
+
+            metadata = {f'{config.PROJECT_NAME}_doc_id': issue["fields"].get(f"{config.PROJECT_NAME}_doc_id") or _doc_id,
+                        f'{config.PROJECT_NAME}_doc_updated_at': issue["fields"]["updated"],
+                        f'{config.PROJECT_NAME}_doc_hash': "",
+                        f'{config.PROJECT_NAME}_doc_size': len(str(issue)),
+                        'key': issue["key"]} 
+            issue_dict[issue[f"{config.PROJECT_NAME}_doc_id"]] = metadata
         return issue_dict
 
     def list_issues(self, jql: str = 'created >= startOfDay("-3d") ORDER BY created DESC', force: bool = False):
@@ -103,10 +134,7 @@ class JIRA(Source):
                 self.logger.warning("Jira jql response run into %s converting to JSON: %s", e,  response)
                 result = {}
 
-            issues_w_metadata = [{f'{self.namespace}_doc_id': d["id"],
-                                  'updated_at': d["fields"]["updated"],
-                                  'key': d["key"]} for d in result.get("issues", [])]
-            returned_issues.extend(issues_w_metadata)
+            returned_issues.extend(result)
             if (nextPageToken := result.get("nextPageToken", None)) is None:
                 # Last page will return null as nextPageToken
                 break
@@ -144,7 +172,7 @@ class JIRA(Source):
         returned_issues = json.loads(response.text).get("issues", [])
         issues_to_return = []
         for ri in returned_issues:
-            # del ri["expand"]
+            # separate customfields into its own sub group
             issue_temp = {"id": ri["id"],
                           "key": ri["key"],
                           "customfields": {}}
@@ -203,11 +231,11 @@ class IssueManager(IndexStore):
                 ],
             }
         )
-        # issue_dir = os.path.join(config.PROJECT_NAME, config.ISSUE_BOARD_DIR)
-        # issue_dir = os.path.join(config.PROJECT_NAME, "Jira.jsons", "subset")
-        # issue_files = Files(issue_dir)
-        jira_issues = JIRA()
-        super().__init__(jira_issues, issue_index_schema)
+        issue_dir = os.path.join(config.PROJECT_NAME, config.ISSUE_BOARD_DIR)
+        issue_dir = os.path.join(config.PROJECT_NAME, "Jira.jsons", "subset")
+        issue_files = Files(issue_dir)
+        # jira_issues = JIRA()
+        super().__init__(issue_files, issue_index_schema)
 
     def create(self):
         pass
