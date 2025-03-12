@@ -12,6 +12,111 @@ body, html {
     width: 100%;
 }
 
+/* JSON Formatter Styles */
+.json-formatter {
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    background-color: #f8f8f8;
+    border-radius: 4px;
+    padding: 10px;
+    overflow: auto;
+    max-height: 500px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.json-formatter .json-key {
+    color: #881391;
+    font-weight: bold;
+}
+
+.json-formatter .json-string {
+    color: #1a1aa6;
+}
+
+.json-formatter .json-number {
+    color: #1e7f0c;
+}
+
+.json-formatter .json-boolean {
+    color: #0000ff;
+}
+
+.json-formatter .json-null {
+    color: #808080;
+}
+
+/* Closing brackets and braces */
+.json-closing-bracket, .json-closing-brace, .json-closing {
+    margin-left: 20px;
+    display: flex;
+    vertical-align: bottom;
+}
+
+/* Collapsible JSON styles */
+.collapsible {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.collapsible::before {
+    content: "▼";
+    display: inline-block;
+    margin-right: 5px;
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+
+.collapsible.collapsed::before {
+    transform: rotate(-90deg);
+}
+
+.collapsible.collapsed::after {
+    content: "...";
+    color: #888;
+    margin: 0 2px;
+}
+
+.json-content {
+    margin-left: 20px;
+    transition: height 0.2s ease-out;
+    width: 100%;
+    display: block;
+}
+
+.json-content.hidden {
+    display: none;
+}
+
+/* JSON array and object item styles */
+.json-array-item, .json-property {
+    position: relative;
+    margin: 2px 0;
+}
+
+.json-comma {
+    margin-left: 2px;
+    display: inline-block;
+    vertical-align: bottom;
+    
+}
+
+/* JSON item container */
+.json-item {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    position: relative;
+}
+
+/* Key styling */
+.json-key {
+    color: #881391;
+    font-weight: bold;
+}
+
 /* Left panel - Issue display */
 .issue-panel {
     flex: 1;
@@ -72,6 +177,24 @@ body, html {
 
 .issue-selector {
     margin-bottom: 20px;
+    padding: 10px;
+    border-radius: 5px;
+    background-color: #f0f0f0;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.issue-selector:hover {
+    background-color: #e0e0e0;
+}
+
+.issue-selector select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    background-color: #fff;
+    cursor: pointer;
 }
 
 /* Right panel - Chat interface */

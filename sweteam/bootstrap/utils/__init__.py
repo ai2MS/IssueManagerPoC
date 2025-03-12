@@ -6,6 +6,7 @@ Usage:
 """
 
 from .file_utils import dir_structure
+from typing import Callable, Any
 import os
 import subprocess
 from enum import Enum
@@ -16,6 +17,35 @@ from .initialize_project import initialize_package, initialize_Dockerfile, initi
 from .log import logger
 from ..config import config
 
+def get_dot_notation_value(dict_obj, dot_path, default=None):
+    """
+    Access nested dictionary values using dot notation
+    
+    Args:
+        dict_obj (dict): The dictionary to search
+        dot_path (str): Path to value using dot notation (e.g. "status.name")
+        default (any): value to return if the key is not found, None if ommited
+    Returns:
+        The value if found, None if not found
+    """
+    try:
+        parts = dot_path.split('.')
+        value = dict_obj
+        for part in parts:
+            value = value[part]
+        return value
+    except (KeyError, TypeError):
+        return default
+
+def timed_execution(f: Callable, *args, **kwargs) -> Any:
+    import time
+    logger.info("Start timed execution of %s...", f.__name__)
+    start_time = time.time()
+    return_value = f(*args, **kwargs)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    self.logger.info("Timed Execution of %s completed in %.2f seconds", f.__name__, elapsed_time)
+    return return_value
 
 class Action(Enum):
     """Action Enum for the agent to take."""

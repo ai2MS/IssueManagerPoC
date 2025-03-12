@@ -148,13 +148,15 @@ class Ollama_Agent(BaseAgent):
         func_names = [item['function']['name']
                       for item in self.tools if item['type'] == "function"]
 
-        if context and (isinstance(context, list) and [True for m in context if isinstance(m, self.MessageHistory)]):
+        if (isinstance(context, list) and [True for m in context if isinstance(m, self.MessageHistory)]):
             task_messages = context
         elif isinstance(context, str):
             task_messages = [{'role': 'user', 'content': f"Given the following context: {context}"}]
-        else:
+        elif context:
             task_messages = [
                 {'role': 'user', 'content': f"Considering the following structured context: {json.dumps(context)}"}]
+        else:
+            task_messages = self.messages
 
         self.messages_append({'role': 'user', 'content': f"Please do the following: {task}"},
                              msg_hist_object=task_messages)

@@ -12,46 +12,59 @@ import json
 from requests.auth import HTTPBasicAuth
 import requests
 import os
-from tracemalloc import stop
-from idna import decode
+
 from redisvl.schema import IndexSchema
 
-from .log import get_default_logger
-
 from ..config import config
-
+from .log import get_default_logger
 from .doc_indexes import (embedding_dim, Source, Files, IndexStore, Document)
+from . import get_dot_notation_value
 
 
 class JIRA(Source):
-    def __init__(self):
+    def __init__(self, namespace:str = "", field_mapping:dict = {}):
         self.logger = get_default_logger(self.__class__.__name__)
-        self.namespace = f"{config.PROJECT_NAME}_Jira"
+        self.namespace = namespace or f"{config.PROJECT_NAME}"
         self.auth = HTTPBasicAuth(config.JIRA_USERNAME, config.JIRA_API_KEY)
         self.base_url = config.JIRA_BASE_URL
         self.issues_to_reconcile = []
+        self.field_mapping = field_mapping or {
+            "id": "id",
+            "status": "status.name",
+            "title": "summary",
+            "priority": "priority.name",
+            "created_at": "created",
+            "updated_at": "updated"
+        }
+    def get_issue_metadata(self, issue: dict) -> dict:
+        key_prefix = f"{self.namespace}"
+        metadata={}
+        for k, v in self.field_mapping.items():
+            metadata[key_prefix + k]=get_dot_notation_value(issue, v)
+        return metadata
 
-    def get_all_documents(self, doc_id_field_name: str = "id") -> list[Document]:
+    def get_all_documents(self) -> list[Document]:
+        """Retrieve all Jira documents that would be listed in list_issues()
+        Will repeat Jira call as long as there are still next pages
+        """
         documents = []
-        issue_list = [i for i in self.list_issues()]
+        issue_list = [get_dot_notation_value(i, self.field_mapping['id']) for i in self.list_issues()]
         jira_batch_size = 10
         for batch_begin in range(0, len(issue_list), jira_batch_size):
             issue_list_batch = issue_list[batch_begin:batch_begin+jira_batch_size]
             issue_batch = self.retrieve_issues(issue_list=issue_list_batch)
             document_batch = []
             for issue in issue_batch:
-                issue_json = {f"doc_id": f"{issue[doc_id_field_name]}",
-                              "extra_info": issue, "text": issue['description']}
-                issue_document = Document(text=issue_json)
-                issue_document.metadata[f"{config.PROJECT_NAME}_doc_id"] = f"{issue[doc_id_field_name]}"
-                issue_document.metadata["doc_size"] = len(issue)
-                issue_document.metadata["updated_at"] = issue['updated']
+                doc_id = get_dot_notation_value(issue,self.field_mapping['id'])
+                extra_info = self.get_issue_metadata(issue=issue)
+                text = json.dumps(issue)
+                issue_document = Document(doc_id=doc_id, extra_info=extra_info, text=text)
                 document_batch.append(issue_document)
             documents.extend(document_batch)
 
         return documents
 
-    def get_documents(self, doc_id_list: list = [], doc_id_field_name: str = "id") -> list[Document]:
+    def get_documents(self, doc_id_list: list = []) -> list[Document]:
         documents = []
         issue_list = doc_id_list
         jira_batch_size = 10
@@ -60,12 +73,10 @@ class JIRA(Source):
             issue_batch = self.retrieve_issues(issue_list=issue_list_batch)
             document_batch = []
             for issue in issue_batch:
-                issue_json = {f"doc_id": f"{issue[doc_id_field_name]}",
-                              "extra_info": issue, "text": issue['description']}
-                issue_document = Document(text=issue_json)
-                issue_document.metadata[f"{config.PROJECT_NAME}_doc_id"] = f"{issue[doc_id_field_name]}"
-                issue_document.metadata["doc_size"] = len(issue)
-                issue_document.metadata["updated_at"] = issue['updated']
+                doc_id = get_dot_notation_value(issue,self.field_mapping['id'])
+                extra_info = self.get_issue_metadata(issue=issue)
+                text = json.dumps(issue)
+                issue_document = Document(doc_id=doc_id, extra_info=extra_info, text=text)
                 document_batch.append(issue_document)
             documents.extend(document_batch)
 
@@ -75,14 +86,13 @@ class JIRA(Source):
         issue_list = self.list_issues(jql='created >= startOfDay("-30d") ORDER BY created DESC')
         issue_dict = {}
         for issue in issue_list:
-            _doc_id= issue.get("id") or issue.get("doc_id") or issue[f"{config.PROJECT_NAME}_doc_id"]
+            _doc_id = get_dot_notation_value(issue,self.field_mapping['id']) or issue.get('id') or issue.get('key')
 
-            metadata = {f'{config.PROJECT_NAME}_doc_id': issue["fields"].get(f"{config.PROJECT_NAME}_doc_id") or _doc_id,
-                        f'{config.PROJECT_NAME}_doc_updated_at': issue["fields"]["updated"],
-                        f'{config.PROJECT_NAME}_doc_hash': "",
-                        f'{config.PROJECT_NAME}_doc_size': len(str(issue)),
-                        'key': issue["key"]} 
-            issue_dict[issue[f"{config.PROJECT_NAME}_doc_id"]] = metadata
+            metadata={}
+            for k, v in self.field_mapping.items():
+                metadata[self.namespace + k]=get_dot_notation_value(issue, v)
+
+            issue_dict[_doc_id] = metadata
         return issue_dict
 
     def list_issues(self, jql: str = 'created >= startOfDay("-3d") ORDER BY created DESC', force: bool = False):
@@ -116,7 +126,7 @@ class JIRA(Source):
             query = {
                 'jql': jql,
                 'nextPageToken': nextPageToken,
-                'fields': 'id,key,updated',
+                'fields': 'id,key,updated,status,summary,priority,created',
                 'maxResults': maxResults,
                 'reconcileIssues': reconcileIssues
             }
@@ -133,8 +143,12 @@ class JIRA(Source):
             except Exception as e:
                 self.logger.warning("Jira jql response run into %s converting to JSON: %s", e,  response)
                 result = {}
-
-            returned_issues.extend(result)
+            issues = result['issues']
+            for issue in issues:
+                for k, v in issue.get("fields", {}).items():
+                    issue[k] = v
+                del issue['fields']
+            returned_issues.extend(issues)
             if (nextPageToken := result.get("nextPageToken", None)) is None:
                 # Last page will return null as nextPageToken
                 break
@@ -151,10 +165,10 @@ class JIRA(Source):
 
         payload = json.dumps({
             "expand": [
-                "names"
+                "names","changelog"
             ],
             "fields": [
-                "*navigable"
+                "*navigable","comment"
             ],
             "fieldsByKeys": False,
             "issueIdsOrKeys": issue_list,
@@ -176,11 +190,17 @@ class JIRA(Source):
             issue_temp = {"id": ri["id"],
                           "key": ri["key"],
                           "customfields": {}}
-            for f in ri["fields"]:
-                if f.startswith("customfield"):
-                    issue_temp["customfields"][f] = (ri["fields"][f])
+            for fk, fv in ri["fields"].items():
+                if fk.startswith("customfield"):
+                    issue_temp["customfields"][fk] = fv
+                elif fk == "comment" and "comments" in fv:
+                    # Jira "comments" is an array under key "comment", 
+                    # we pull it to field level 
+                    issue_temp["comments"] = fv["comments"]
                 else:
-                    issue_temp[f] = ri["fields"][f]
+                    issue_temp[fk] = fv
+                
+                
 
             issues_to_return.append(issue_temp)
         return issues_to_return
@@ -201,11 +221,13 @@ class IssueManager(IndexStore):
 
     def __init__(self):
         self.name: str = "issue_man"
+        namespace = "Jira_"
+
         issue_index_schema = IndexSchema.from_dict(
             {
                 # customize basic index specs
                 "index": {
-                    "name": f"{self.name}.vector",
+                    "name": f"{namespace}vector",
                     "prefix": "issidx",
                     "key_separator": ":",
                 },
@@ -231,11 +253,11 @@ class IssueManager(IndexStore):
                 ],
             }
         )
-        issue_dir = os.path.join(config.PROJECT_NAME, config.ISSUE_BOARD_DIR)
-        issue_dir = os.path.join(config.PROJECT_NAME, "Jira.jsons", "subset")
-        issue_files = Files(issue_dir)
-        # jira_issues = JIRA()
-        super().__init__(issue_files, issue_index_schema)
+        # issue_dir = os.path.join(config.PROJECT_NAME, config.ISSUE_BOARD_DIR)
+        # issue_dir = os.path.join(config.PROJECT_NAME, "Jira.jsons", "subset")
+        # issue_files = Files(issue_dir)
+        jira_issues = JIRA(namespace=namespace)
+        super().__init__(jira_issues, issue_index_schema, namespace=namespace)
 
     def create(self):
         pass

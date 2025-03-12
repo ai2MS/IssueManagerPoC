@@ -5,44 +5,94 @@ document.addEventListener('DOMContentLoaded', function() {
     const issueSelector = document.getElementById('issue-selector');
     
     // Load the first issue by default
-    loadIssue(issueSelector.value);
+    if (issueSelector && issueSelector.value) {
+        loadIssue(issueSelector.value);
+    }
     
     // Handle issue selection change
-    issueSelector.addEventListener('change', function() {
-        loadIssue(this.value);
-    });
+    if (issueSelector) {
+        issueSelector.addEventListener('change', function() {
+            loadIssue(this.value);
+        });
+    }
     
     // Handle chat form submission
-    chatForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const message = chatInput.value.trim();
-        if (message) {
-            // Add user message to chat
-            addMessage(message, 'user');
+    if (chatForm) {
+        chatForm.addEventListener('submit', function(e) {
+            e.preventDefault();
             
-            // Clear input field
-            chatInput.value = '';
-            
-            // Get current issue ID
-            const issueId = issueSelector.value;
-            
-            // Send message to backend
-            sendMessage(message, issueId);
-        }
-    });
+            const message = chatInput.value.trim();
+            if (message) {
+                // Add user message to chat
+                addMessage(message, 'user');
+                
+                // Clear input field
+                chatInput.value = '';
+                
+                // Get current issue ID
+                const issueId = issueSelector.value;
+                
+                // Send message to backend
+                sendMessage(message, issueId);
+            }
+        });
+    }
     
     // Function to load issue details
     function loadIssue(issueId) {
         fetch(`/api/issues/${issueId}`)
             .then(response => response.json())
             .then(data => {
+                console.log("Loaded issue data:", data);
+                
                 // Update issue display
-                document.getElementById('issue-title').textContent = data.title;
-                document.getElementById('issue-id').textContent = data.id;
-                document.getElementById('issue-status').textContent = data.status;
-                document.getElementById('issue-created').textContent = data.created;
-                document.getElementById('issue-description').textContent = data.description;
+                document.getElementById('issue-title').textContent = data.title || "No Title";
+                document.getElementById('issue-id').textContent = data.id || "-";
+                document.getElementById('issue-status').textContent = data.status || "Unknown";
+                document.getElementById('issue-created').textContent = data.created || "Unknown";
+                
+                // Format description as JSON if it's a JSON object or string
+                const descriptionContainer = document.getElementById('issue-description');
+                
+                // Clear previous content
+                descriptionContainer.innerHTML = '';
+                
+                // Check if description exists and is not empty
+                if (data.description) {
+                    console.log("Description type:", typeof data.description);
+                    
+                    let jsonData;
+                    
+                    // If description is a string that looks like JSON, try to parse it
+                    if (typeof data.description === 'string') {
+                        try {
+                            jsonData = JSON.parse(data.description);
+                            console.log("Parsed JSON data:", jsonData);
+                        } catch (e) {
+                            // If parsing fails, use the string as is
+                            console.log("Failed to parse description as JSON:", e);
+                            jsonData = data.description;
+                        }
+                    } else {
+                        // If it's already an object, use it directly
+                        console.log("Description is already an object");
+                        jsonData = data.description;
+                    }
+                    
+                    // If we have a valid object or array (not a primitive), format it as JSON
+                    if (typeof jsonData === 'object' && jsonData !== null) {
+                        console.log("Formatting as JSON object");
+                        
+                        // Use our JSON formatter to create collapsible JSON
+                        parseAndFormatJSON(JSON.stringify(jsonData), descriptionContainer);
+                    } else {
+                        // For primitive values or parsing failures, display as plain text
+                        console.log("Displaying as plain text");
+                        descriptionContainer.textContent = data.description;
+                    }
+                } else {
+                    descriptionContainer.textContent = "No description available";
+                }
                 
                 // Clear previous comments
                 const commentsContainer = document.getElementById('issue-comments');
@@ -72,15 +122,55 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Error loading issue:', error);
-                document.getElementById('issue-content').innerHTML = '<p>Error loading issue. Please try again.</p>';
+                const issueContent = document.getElementById('issue-content');
+                if (issueContent) {
+                    issueContent.innerHTML = '<p>Error loading issue. Please try again.</p>';
+                }
             });
     }
+    
+    // Function to format JSON with syntax highlighting
+    function formatJsonSyntax(json) {
+        // Replace with HTML for syntax highlighting
+        return json
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(match) {
+                let cls = 'json-number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'json-key';
+                    } else {
+                        cls = 'json-string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'json-boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'json-null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+    }
+    
     
     // Function to add a message to the chat
     function addMessage(text, sender) {
         const messageElement = document.createElement('div');
         messageElement.className = `message ${sender}-message`;
-        messageElement.textContent = text;
+        
+        // Check if the message is a JSON string
+        try {
+            const jsonData = JSON.parse(text);
+            // If parsing succeeds, format it as collapsible JSON
+            const jsonContainer = document.createElement('div');
+            parseAndFormatJSON(text, jsonContainer);
+            messageElement.appendChild(jsonContainer);
+        } catch (e) {
+            // If not JSON, display as regular text
+            messageElement.textContent = text;
+        }
+        
         chatMessages.appendChild(messageElement);
         
         // Scroll to the bottom of the chat

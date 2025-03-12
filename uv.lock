@@ -935,6 +935,18 @@ wheels = [
 ]
 
 [[package]]
+name = "llama-index-readers-json"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "llama-index-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b1/56/04d80a07c15c256a9d6bf69f9cbfdea1acc8579a411829db8b7f35de6252/llama_index_readers_json-0.3.0.tar.gz", hash = "sha256:992f2710af0b575c15874c15ed6f04ba32c7ed070f6a01c8e0fe5c4f46c7009e", size = 3557 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/79/dba4b6cfc49cbfb6220d9c19f215c4ec0d6e275c1921b8616243c05e6dbd/llama_index_readers_json-0.3.0-py3-none-any.whl", hash = "sha256:0bb03482a92e2519189ad5589373b3f1ba1b7ddabbfcaa74864449e1116f3a76", size = 3946 },
+]
+
+[[package]]
 name = "llama-index-readers-llama-parse"
 version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2099,6 +2111,7 @@ dependencies = [
     { name = "llama-index-embeddings-ollama" },
     { name = "llama-index-llms-ollama" },
     { name = "llama-index-readers-file" },
+    { name = "llama-index-readers-json" },
     { name = "llama-index-storage-docstore-redis" },
     { name = "llama-index-storage-index-store-redis" },
     { name = "llama-index-vector-stores-redis" },
@@ -2123,6 +2136,7 @@ requires-dist = [
     { name = "llama-index-embeddings-ollama", specifier = ">=0.5.0" },
     { name = "llama-index-llms-ollama", specifier = ">=0.5.2" },
     { name = "llama-index-readers-file", specifier = ">=0.4.5" },
+    { name = "llama-index-readers-json", specifier = ">=0.3.0" },
     { name = "llama-index-storage-docstore-redis", specifier = ">=0.3.0" },
     { name = "llama-index-storage-index-store-redis", specifier = ">=0.4.0" },
     { name = "llama-index-vector-stores-redis", specifier = ">=0.5.0" },

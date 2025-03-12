@@ -251,6 +251,7 @@ class Orchestrator(BaseAgent):
             agent_roles.append((agt.name, self.distill("What is the role of the agent?", "",
                                                        agt.config.instruction).answer))
 
+        # main orchestration loop
         retry_count = config.RETRY_COUNT
         while (retry_count := retry_count - 1) > 0:
             open_issues = get_open_issues()
@@ -272,113 +273,14 @@ class Orchestrator(BaseAgent):
                 map(int, x.get("issue", "").split("/")))])
             for open_issue in open_issues:
                 issue_number = open_issue.get("issue")
-                for agt in [a for a in agents if (a.name == open_issue.get('assignee') != self.name)]:
-                    to_agt_prompt = (f"Issue {issue_number} is assigned to you "
-                    f"and is in {open_issue.get('status')} status, it is about {open_issue.get('title')}. "
-                    "Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, "
-                    f"If you feel it is not clear and specific enough please analyze how to describe it in more details and create more specific sub issues for coding."
-                    )
-                    agt_reply = agt.perform_task(to_agt_prompt, self.name, 
-                                context={'issue': self.issue_manager(action='read', issue=open_issue.get('issue'))})
-
-                    # Review the response
-                    response_evaluation = self.evalate_response(to_agt_prompt,
-                                                                str(agt_reply), open_issue)
-                    self.logger.debug("Review response: %s", response_evaluation)
-
-                    # should update feedback file here?
-
-                    if response_evaluation.score <= 5:
-                        # was the response not satisfactory? have it re-done?
-                        self.logger.warning(
-                            "Agent %s response was not satisfactory, score: %s, agent_response: %s"
-                            , agt.name, response_evaluation.score, agt_reply)
-                        continue
-
-                    ## check if the response include code snipets, if so save them to files
-                    has_code_to_update = self.is_true(
-                        "Does the response include code snippets?", to_agt_prompt, json.dumps(agt_reply))
-                    if has_code_to_update.is_true:
-                        save_code_prompt = (f"The assistant {agt.name} provided code snippets in the response. "
-                                            "use apply_unified_diff() or overwrite_file() tool to save the code snippets "
-                                            "to the files meant for these code snipets to be saved in."
-                                            f"if you are uncertain, use the chat_with_other_agent() tool to ask {agt.name} "
-                                            "to provide the filenames for the code snipets."
-                                            f"apply_unified_diff() tool instruction: {tool_instructions['apply_unified_diff']}"
-                                            f"overwrite_file() tool instruction: {tool_instructions['overwrite_file']}"
-                                            f"chat_with_other_agent() tool instruction: {tool_instructions['chat_with_other_agent']}"
-                        )
-                        save_code_reply = self.perform_task(save_code_prompt, self.name, 
-                                context={'issue': self.issue_manager(action='read', issue=open_issue.get('issue'))})
-                        code_saved = self.is_true(
-                            "Was the code saved successfully?", save_code_prompt, save_code_reply["message"]["content"])
-                        if code_saved.is_true:
-                            self.logger.info(
-                                "Code snippets saved successfully.")
-                        else:
-                            self.logger.warning(
-                                "Code snippets failed to save. Details: %s", code_saved.exaplanation)
-                            
-                    ## check if the status of the issue is updated
-                    issue_updated = self.is_true(
-                        f"Did agent {agt.name} update the issue ticket(s)?", to_agt_prompt, json.dumps(agt_reply))
-                    if issue_updated.is_true:
-                        self.logger.info("Issue %s was updated by %s", issue_number, agt.name)
-                    else:
-                        update_issue_prompt = (f"The assistant {agt.name} provided the following response. "
-                                            f"use issue_manager(action='update'...) to update the issue {issue_number} "
-                                            'and if needed, its sub-issues, according to the response provided by the assistant. '
-                        )
-                        update_issue_reply = self.perform_task(update_issue_prompt, self.name, 
-                                context={'issue_original_content': self.issue_manager(action='read', issue=issue_number)})
-                        issue_updated = self.is_true(
-                            "Was the issue(s) updated successfully?", update_issue_prompt, json.dump(update_issue_reply["message"]))
-                        if code_saved.is_true:
-                            self.logger.info(
-                                "Issue %s saved successfully.", issue_number)
-                        else:
-                            self.logger.warning(
-                                "Issue %s failed to save. Details: %s", issue_number, issue_updated.exaplanation)
-
-                    # check the stage of the issue,
-                    # if stage is "plan", review if the issue is detailed enough to start coding, and break it down to steps and sub-issues
-                    # if stage is "coding", run the code of the updated file to check if it is working
-                    # if stage is "testing", run the main.py to check if the integration is working
-                    # if stage is "deploy", run the docker-compose to check if the code can be deployed properly
-                    stages = ["plan", "coding", "testing", "deploy"]
-                    issue_stage = self.distill(
-                        f"Considering the content of issue #{issue_number}, which of the following stage is the issue in, {stages} ?"
-                        , '', json.dumps(self.issue_manager(action='read', issue=issue_number)))
-
-                    match issue_stage.answer:
-                        case "plan":
-                            self.logger("Issue %s is in plan stage, need to break it down to steps and sub-issues.", issue_number)
-                            pass
-                        case "coding":
-                            # test the updated file - run the code using execute_module()
-                            pass
-                        case "testing":
-                            test_result = self.execute_command("bash", ["run.sh"])
-                            to_self_prompt = (f"regarding issue {open_issue.get('issue')}, {agt.name} had responded with \"{agt_reply}\". And the current run.sh result is {test_result}."
-                                            f"Use your file_search tool to check if the information provided in this reply exist in the issue files in your issues vector_store?"
-                                            f"If not please use issue_manager() tool to update relevant issue or create sub issues under the most relevant issue."
-                                            )
-                            o_reply = self.perform_task(to_self_prompt, f"Orchestrator check if "
-                                                        f"{agt.name} complete issue.", {"issue": open_issue.get('issue', 'generic')})
-                            self.logger.debug(
-                                f"<{self.name}> - Orchestrator self perform task update issue result:{o_reply}")
-
-                        case "deploy":
-                            # test the deployment - build docker, deploy to minikube, check the deployment
-                            pass
-
-
-                    break
+                for agt in agents:
+                    if agt.name == open_issue.get('assignee') != self.name:
+                        break
                 else:
                     self.logger.warning("No agent found with name %s", open_issue.get('assignee'))
                     # if not assigned, assigned to someone does not exist, or assigned to myself, try assign it
                     to_self_prompt = (f"Issue {issue_number} is assigned to {open_issue.get("assignee", "No One")},  "
-                                      "which is incorrect. Based on these roles descriptions, use the issue_manager tool "
+                                      "which does not exist. Based on these roles descriptions, use the issue_manager tool "
                                       "action=assign to assign this issue to the most appropriate agent.\n"
                                       f"agent_roles: {agent_roles}."
                                       f"issue_manager() tool instruction: {tool_instructions['issue_manager']}")
@@ -387,6 +289,125 @@ class Orchestrator(BaseAgent):
 
                     # Issue re-assigned, Higher priority issue should be handled first, so break the loop
                     break
+                
+                to_agt_prompt = (f"Issue {issue_number} is assigned to you "
+                f"and is in {open_issue.get('status')} status, it is about {open_issue.get('title')}. "
+                "Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, "
+                f"If you feel it is not clear and specific enough please analyze how to describe it in more details and create more specific sub issues for coding."
+                )
+                agt_reply = agt.perform_task(to_agt_prompt, self.name, 
+                            context={'issue': self.issue_manager(action='read', issue=open_issue.get('issue'))})
+
+                # Review the response
+                response_evaluation = self.evalate_response(to_agt_prompt, str(agt_reply), open_issue)
+                self.logger.debug("Review response: %s", response_evaluation)
+
+                # should update feedback file here?
+
+                if response_evaluation.score <= 5:
+                    # was the response not satisfactory? have it re-done?
+                    self.logger.warning(
+                        "Agent %s response was not satisfactory, score: %s, agent_response: %s"
+                        , agt.name, response_evaluation.score, agt_reply)
+                    break
+
+                ## check if the status of the issue is updated
+                issue_updated = self.is_true(
+                    f"Did agent {agt.name} update the issue ticket(s)?", to_agt_prompt, json.dumps(agt_reply))
+                if issue_updated.is_true:
+                    self.logger.info("Issue %s was updated by %s", issue_number, agt.name)
+                else:
+                    update_issue_prompt = (f"The assistant {agt.name} provided the following response. "
+                                        f"use issue_manager(action='update'...) to update the issue {issue_number} "
+                                        'and if needed, its sub-issues, according to the response provided by the assistant. '
+                    )
+                    update_issue_reply = self.perform_task(update_issue_prompt, self.name, 
+                            context=[{'role': "user", 'content': str(self.issue_manager(action='read', issue=open_issue.get('issue')))},
+                                        {'role': "user", 'content': to_agt_prompt}, 
+                                        {'role': "assistant", 'content': agt_reply}])
+                    issue_updated = self.is_true(
+                        "Was the issue(s) updated successfully?", update_issue_prompt, json.dump(update_issue_reply["message"]))
+                    if code_saved.is_true:
+                        self.logger.info(
+                            "Issue %s saved successfully.", issue_number)
+                    else:
+                        self.logger.warning(
+                            "Issue %s failed to save. Details: %s", issue_number, issue_updated.exaplanation)
+
+                ## check if the response include code snipets, if so save them to files
+                has_code_to_update = self.is_true(
+                    "Does the response include code snippets?", to_agt_prompt, json.dumps(agt_reply))
+                if has_code_to_update.is_true:
+                    save_code_prompt = (f"The assistant {agt.name} provided code snippets in the response. "
+                                        "Please evaluate if these code snippets should be saved into files to "
+                                        f"become part of the software project to address issue {issue_number} "
+                                        "If so, use apply_unified_diff() or overwrite_file() tool to save the code "
+                                        "to the files meant for these code snipets to be saved in."
+                                        f"if you are uncertain, use the dir_structure() tool to evaluate the current directory"
+                                        f"and then use the chat_with_other_agent() tool to ask {agt.name} to provide the filenames for the code snipets."
+                                        f"apply_unified_diff() tool instruction: {tool_instructions['apply_unified_diff']}"
+                                        f"overwrite_file() tool instruction: {tool_instructions['overwrite_file']}"
+                                        f"chat_with_other_agent() tool instruction: {tool_instructions['chat_with_other_agent']}"
+                    )
+                    save_code_reply = self.perform_task(save_code_prompt, self.name, 
+                            context=[{'role': "user", 'content': str(self.issue_manager(action='read', issue=open_issue.get('issue')))},
+                                        {'role': "user", 'content': to_agt_prompt}, 
+                                        {'role': "assistant", 'content': agt_reply}])
+                    code_saved = self.is_true(
+                        "Was the code saved successfully?", save_code_prompt, save_code_reply["message"]["content"])
+                    if code_saved.is_true:
+                        self.logger.info("Code snippets saved successfully.")
+                        # update the issue ticket to reflect this update
+                        update_issue_prompt = (f"The code provided by agent {agt.name} have been saved, please "
+                                                f"use issue_manager() tool to update issue {issue_number} or its "
+                                                "sub-issues. Please include rationale of the change and brief "
+                                                f"description of the change.")
+                        update_issue_reply = self.perform_task(update_issue_prompt, self.name, 
+                                context=[{'role': "user", 'content': str(self.issue_manager(action='read', issue=open_issue.get('issue')))},
+                                            {'role': "user", 'content': to_agt_prompt}, 
+                                            {'role': "assistant", 'content': agt_reply},
+                                            {'role': "user", 'content': str(save_code_prompt)},
+                                            {'role': "assistent", 'content': str(save_code_reply)}])
+                    else:
+                        self.logger.warning(
+                            "Code snippets failed to save. Details: %s", code_saved.exaplanation)
+                        
+
+                # check the stage of the issue,
+                # if stage is "plan", review if the issue is detailed enough to start coding, and break it down to steps and sub-issues
+                # if stage is "coding", run the code of the updated file to check if it is working
+                # if stage is "testing", run the main.py to check if the integration is working
+                # if stage is "deploy", run the docker-compose to check if the code can be deployed properly
+                stages = ["plan", "coding", "testing", "deploy"]
+                issue_stage = self.distill(
+                    f"Considering the content of issue #{issue_number}, which of the following stage is the issue in, {stages} ?"
+                    , '', json.dumps(self.issue_manager(action='read', issue=issue_number)))
+
+                match issue_stage.answer:
+                    case "plan":
+                        self.logger("Issue %s is in plan stage, need to break it down to steps and sub-issues.", issue_number)
+                        pass
+                    case "coding":
+                        # test the updated file - run the code using execute_module()
+                        pass
+                    case "testing":
+                        test_result = self.execute_command("bash", ["run.sh"])
+                        to_self_prompt = (f"regarding issue {open_issue.get('issue')}, {agt.name} had responded with \"{agt_reply}\". And the current run.sh result is {test_result}."
+                                        f"Use your file_search tool to check if the information provided in this reply exist in the issue files in your issues vector_store?"
+                                        f"If not please use issue_manager() tool to update relevant issue or create sub issues under the most relevant issue."
+                                        )
+                        o_reply = self.perform_task(to_self_prompt, f"Orchestrator check if "
+                                                    f"{agt.name} complete issue.", {"issue": open_issue.get('issue', 'generic')})
+                        self.logger.debug(
+                            f"<{self.name}> - Orchestrator self perform task update issue result:{o_reply}")
+
+                    case "deploy":
+                        # test the deployment - build docker, deploy to minikube, check the deployment
+                        pass
+
+
+                break
+
                 
         open_issues = get_open_issues()
         if open_issues:

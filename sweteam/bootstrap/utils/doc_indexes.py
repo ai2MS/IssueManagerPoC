@@ -12,9 +12,6 @@ from abc import ABC, abstractmethod
 import os
 import json
 import hashlib
-from datetime import datetime
-from pydoc import Doc
-from click import pass_context
 from llama_index.core import (VectorStoreIndex, load_index_from_storage,
                               SimpleKeywordTableIndex, KeywordTableIndex, SummaryIndex,
                               SimpleDirectoryReader, StorageContext, Settings, Document)
@@ -51,26 +48,55 @@ Settings.llm = Ollama(model=config.OLLAMA_DEFAULT_BASE_MODEL,
 
 
 class Source(ABC):
+    """This is the base class used to get documents and metadata from various sources.
+    The Issue Manger indexes issue tickets, by retrieving the issue tickets from the source
+    For the IssueManager to be able to udnerstand the contents of the issues from different sources, 
+    Each source needs a wrapper derived from this class - read the raw source data and convert them to
+    a standard format that IssueManager can index.
+    """
     @abstractmethod
-    def get_all_documents() -> list[Document]:
+    def get_all_documents(self) -> list[Document]:
         """Returns all the documents as whole as a list
+        The IssueManager will need the source document (i.e. each ticket) to be a Document object
+        which is defined by llama-index, methods like SimpleDirectoryReader().load_data() will 
+        return a list[Document]
+        Args:
+            None
+        Returns:
+            list[Document]
+        """
+        """ Additional documentation:
+            It is STRONGLY recommended to suppliment the Document objects with additional metadata
+            these metadata helps identify if a document has been updated without doing the full 
+            document read.
+            Such metadata will be stored as part of the Document.metadata collection (which is a flat 
+            key:value pair list), the key will be prefixed with f"{self.namespace}" and only if 
+            all the values of such keys match, it would be consdiered the Document has not changed. 
         """
         pass
 
     @abstractmethod
-    def get_all_metadata() -> list:
-        """The metadata of each document (i.e. an issue, or a file) should
+    def get_all_metadata(self) -> dict:
+        """Returns all the metadata of each document (i.e. an issue, or a file) should
         be sufficient to identify if the document has changed without having to go 
         through the full cycle of retrieving the full document from the source.
         This is used to provide a document list, and/or compare if a document needs to be refreshed
+        Args:
+            None
+        Returns:
+            dict: keys are the ids of the document, value are the namespace specific metadata key:value pairs
         """
         pass
 
     @abstractmethod
-    def get_documents() -> list[Document]:
-        """Retrieve a group of specified documents
-        The parameter is a list of document ids
-        ß"""
+    def get_documents(self, doc_id_list: list[str]) -> list[Document]:
+        """Retrieve a group of documents by their ids. Should be a subset of what get_all_documents return
+        which means the metadata should be provided consistently as the get_all_documents()
+        Args:
+            doc_id_list: a list of strings that specifies the documents to retrieve
+        Returns:
+            list[Document]
+        """
         pass
 
 
@@ -112,8 +138,8 @@ class Files(Source):
 
         return hash_func.hexdigest()
 
-    def get_all_documents(self) -> list[str]:
-        """return list of llama-index Document objects with _doc_id, doc_size and updated_at special meta data
+    def get_all_documents(self) -> list[Document]:
+        """return list of llama-index Document objects with special meta data
         """
         documents = []
         if os.path.exists(self.path) and dir_contains(self.path, recursive=True):
@@ -123,14 +149,11 @@ class Files(Source):
                 if hasattr(document, "metadata"):
                     file_path = document.metadata["file_path"]
                     metadata = {
-                        "_doc_id": file_path.removeprefix(self.path),
-                        "_doc_size": document.metadata["file_size"],
-                        "_doc_created_at": os.stat(file_path).st_ctime,
-                        "_doc_updated_at": os.stat(file_path).st_mtime,
-                        "_doc_hash": self.get_file_hash(file_path)
-                    }
+                        "id": file_path.removeprefix(self.path),
+                        "size": document.metadata["file_size"]}
+                    self.get_metadata(os.stat(file_path), metadata)
                     for k, v in metadata.items():
-                        document.metadata[f"{config.PROJECT_NAME}{k}"] = v
+                        document.metadata[f"{self.source.namespace}{k}"] = v
 
                 else:
                     self.warning("Document %s does not have metadata, this is strange!", document)
@@ -138,6 +161,8 @@ class Files(Source):
         return documents
 
     def get_documents(self, doc_id_list: list) -> list[Document]:
+        """Retrieve standard file system level info as file metadata
+        """
         documents = []
         doc_path_list = [os.path.join(self.path, id) for id in doc_id_list]
         if any([os.path.exists(f) for f in doc_path_list]):
@@ -146,26 +171,35 @@ class Files(Source):
                 if hasattr(document, "metadata"):
                     file_path = document.metadata["file_path"]
                     metadata = {
-                        "_doc_id": file_path.removeprefix(self.path),
-                        "_doc_size": document.metadata["file_size"],
-                        "_doc_created_at": os.stat(file_path).st_ctime,
-                        "_doc_updated_at": os.stat(file_path).st_mtime,
-                        "_doc_hash": self.get_file_hash(file_path)
-                    }
+                        "id": file_path.removeprefix(self.path),
+                        "size": document.metadata["file_size"]}
+                    self.get_metadata(os.stat(file_path), metadata)
                     try:
                         file_content = json.loads(document.text)
                     except Exception as e:
                         self.logger.warning("File %s content is not valid json", file_path)
                         file_content = {}
 
-                    metadata["_doc_title"] = file_content.get("title") or file_content.get("Summary")
+                    metadata["title"] = file_content.get("title") or file_content.get("Summary")
                     for k, v in metadata.items():
-                        document.metadata[f"{config.PROJECT_NAME}{k}"] = v
+                        document.metadata[f"{self.source.namespace}{k}"] = v
 
                 else:
                     self.warning("Document %s does not have metadata, this is strange!", document)
 
         return documents
+
+
+    def get_metadata(self, os_stat:object, metadata:dict = {}) -> dict:
+        """return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}
+        """
+        metadata.setdefault(f"{self.namespace}size", os_stat.st_size)
+        metadata.setdefault(f"{self.namespace}created_at", os_stat.st_ctime)
+        metadata.setdefault(f"{self.namespace}updated_at", os_stat.st_mtime)
+        metadata.setdefault(f"{self.namespace}hash", self.get_file_hash(file_path))
+        
+        return metadata
+
 
     def get_all_metadata(self) -> dict:
         """return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}
@@ -178,13 +212,8 @@ class Files(Source):
                 if entry.is_file():  # Check if it's a file
                     file_path = os.path.abspath(entry.path)
                     _doc_id = file_path.removeprefix(dir_path)
-                    metadata = {
-                        f"{config.PROJECT_NAME}_doc_id": _doc_id,
-                        f"{config.PROJECT_NAME}_doc_size": entry.stat().st_size,
-                        f"{config.PROJECT_NAME}_doc_created_at": entry.stat().st_ctime,
-                        f"{config.PROJECT_NAME}_doc_updated_at": entry.stat().st_mtime,
-                        f"{config.PROJECT_NAME}_doc_hash": self.get_file_hash(file_path)
-                    }
+                    metadata = {f"{self.namespace}id": _doc_id}
+                    self.get_metadata(os.stat(file_path), metadata)
                     file_metadata[_doc_id] = metadata
                 elif entry.is_dir():  # Recurse into subdirectories
                     scan_dir_populate_metadata(entry.path)
@@ -207,15 +236,15 @@ class IndexStore():
         Typical implementation (as below) is using Redis K:V pair
         """
         namespace = f"{self.name}:registry" if hasattr(self, "name") else "index_registry"
-        return self.redis_client.get(f"{namespace}:{name}")
+        return self.redis_client.get(f"{namespace}index_id:{name}")
 
     def set_index_id_name_mapping(self, name: str, id: str):
         """Record index name to id mapping. A typeical implementation is using Redis
         """
         namespace = f"{self.name}:registry" if hasattr(self, "name") else "index_registry"
-        self.redis_client.set(f"{namespace}:{name}", id)
+        self.redis_client.set(f"{namespace}index_id:{name}", id)
 
-    def docs_to_nodes(self, documents):
+    def docs_to_nodes(self, documents) -> list[Document]:
         nodes = []
         try:
             nodes = JSONNodeParser().get_nodes_from_documents(documents)
@@ -241,10 +270,10 @@ class IndexStore():
                                         schema=self.index_schema)
 
         index_store = RedisIndexStore.from_redis_client(
-            redis_client=self.redis_client, namespace=f"{self.name}.index")
+            redis_client=self.redis_client, namespace=f"{self.namespace}index")
 
         doc_store = RedisDocumentStore.from_redis_client(
-            redis_client=self.redis_client, namespace=f"{self.name}.doc")
+            redis_client=self.redis_client, namespace=f"{self.namespace}doc")
         # load storage context
 
         storage_context = StorageContext.from_defaults(
@@ -367,6 +396,9 @@ class IndexStore():
     def load_documents(self, document_list: list[Document] = [], force: bool = False):
         """Scan the given directory and load the files in it to the self.index doc store
         """
+        import time
+        start_time = time.time()
+        self.logger.debug("Starting Document Loading ...")
 
         def extract_stored_document_metadata(nodes) -> dict[str: dict]:
             """Extract metadata from stored document nodes.
@@ -379,82 +411,164 @@ class IndexStore():
 
             for node in nodes:
                 # Check if the node has _doc_id in metadata
-                if hasattr(node, "metadata") and f"{config.PROJECT_NAME}_doc_id" in node.metadata:
-                    _doc_id = node.doc_id if hasattr(node, 'doc_id') else node.metadata[f"{config.PROJECT_NAME}_doc_id"]
+                if hasattr(node, "metadata") and f"{self.source.namespace}id" in node.metadata:
+                    _doc_id = node.doc_id if hasattr(node, 'doc_id') else node.metadata[f"{self.source.namespace}id"]
                     node_id = node.node_id if hasattr(node, 'node_id') else _doc_id
                     n_metadata = {}
-                    for k, v in node["metadata"]:
+                    for k, v in node.metadata.items():
                         # extract only metadata that starts with project_name
-                        if k.startswith(f"{config.PROJECT_NAME}_"):
+                        if k.startswith(f"{self.source.namespace}"):
                             n_metadata[k] = v
                     stored_metadata[node_id] = n_metadata
 
             return stored_metadata
+        
 
         all_nodes = list(self.storage_context.docstore.docs.values())
         self.logger.debug("Found %s nodes in storage", len(all_nodes))
         stored_metadata = extract_stored_document_metadata(all_nodes)
-        self.logger.debug("Found %s documents with _doc_id metadata", len(stored_metadata))
+        self.logger.debug("Found %s documents with {namespace} metadata", len(stored_metadata))
 
         # get metadata from the source
-        source_docs_metadata: dict = self.source.get_all_metadata()
-
-        docs_to_remove = []
-        docs_to_add = []
+        if document_list:
+            source_docs_metadata: dict = {d.metadata[f"{self.namespace}id"]: d.metadata 
+                                          for d in document_list if hasattr(d, "metadata")}
+        else:
+            source_docs_metadata: dict = self.source.get_all_metadata()
+        
+        docs_to_remove = set()
+        docs_to_add = set()
         for _doc_id, metadata in source_docs_metadata.items():
             if force:
                 self.logger.debug("force=True specified, adding File %s ...", _doc_id)
-                docs_to_add.append(_doc_id)
-            elif ((matching_docs_metadata := [v for k, v in stored_metadata.items() if k == _doc_id
-                                              or v[f"{config.PROJECT_NAME}_doc_id"]])):
+                docs_to_add.add(_doc_id)
+            elif ((matching_docs_metadata := [v for k, v in stored_metadata.items() 
+                                              if v[f"{self.namespace}id"] == _doc_id]) == []):
                 self.logger.debug("Source doc %s was not found in the docstore, will be added...", _doc_id)
-                docs_to_add.append(_doc_id)
-            elif metadata in matching_docs_metadata:
+                docs_to_add.add(_doc_id)
+            elif metadata not in matching_docs_metadata:
                 self.logger.debug("Source doc %s metadata do not match docstore, will be replaced... "
                                   "Source metadata: %s; Stored metadata list: %s", _doc_id, metadata, matching_docs_metadata)
-                docs_to_remove.append(_doc_id)
-                docs_to_add.append(_doc_id)
+                docs_to_remove.add(_doc_id)
+                docs_to_add.add(_doc_id)
             else:
                 self.logger.debug("Source doc %s was not changed compare to docstore, skipping", _doc_id)
 
-        for stored__doc_id, metadata in [(v[f"{config.PROJECT_NAME}_doc_id"], v) for k, v in stored_metadata.items()]:
+        for stored__doc_id, metadata in [(v[f"{self.source.namespace}id"], v) for k, v in stored_metadata.items()]:
             if force:
                 self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
-                docs_to_remove.append(stored__doc_id)
+                docs_to_remove.add(stored__doc_id)
             elif stored__doc_id not in source_docs_metadata:
-                self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
-                docs_to_remove.append(stored__doc_id)
+                self.logger.debug("removing File %s ...", stored__doc_id)
+                docs_to_remove.add(stored__doc_id)
 
-        remove_count = 0
-        for node in all_nodes:
-            node_id = node.node_id
-            if (hasattr(node, "metadata") and node.metadata.get(f"{config.PROJECT_NAME}_doc_id") in docs_to_remove):
-                remove_count += 1
-                del self.storage_context.docstore.docs[node_id]
-                # or
-                # self.storage_context.docstore.delete_document(node_id)
-                # also delete from vector store
-                if hasattr(self.storage_context.vector_store, "delete"):
-                    self.storage_context.vector_store.delete(node_id)
-                # and delete from index
-        self.logger.debug("Removed %s documents from index", remove_count)
+        # delete from vector store
+        doc_remove_count = 0
+        node_remove_count = 0
+        try:
+            if hasattr(self.storage_context.vector_store, "delete"):
+                self.storage_context.vector_store.delete(ref_doc_id=doc_to_remove)
+                doc_remove_count += 1
+            else:
+                raise (TypeError("This VectorStore does not support .delete method"))
+        except Exception as e:
+            if hasattr(self.storage_context.vector_store, "delete_notes"):
+                nodes_to_remove = set()
+                for node in all_nodes:
+                    node_id = node.node_id
+                    if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove):
+                         nodes_to_remove.add(node_id)
+                         node_remove_count += 1
+                self.storage_context.vector_store.delete_nodes(node_ids=nodes_to_remove)
+        self.logger.debug("Removed %s document and %s nodes that were not linked to doc_ids from docstore"
+                          , doc_remove_count, node_remove_count)
+
+
+        doc_remove_count = 0
+        node_remove_count = 0
+        try: 
+            for doc_to_remove in docs_to_remove:
+                self.storage_context.docstore.delete_ref_doc(ref_doc_id=doc_to_remove)
+                doc_remove_count += 1
+        except: 
+            self.logger.warning("Error removing %s, trying removing nodes with metadata matching this doc", doc_to_remove)
+            for node in all_nodes:
+                node_id = node.node_id
+                if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove):
+                    node_remove_count += 1
+                    #del self.storage_context.docstore.docs[node_id]
+                    self.storage_context.docstore.delete_document(doc_id=node_id)
+        self.logger.debug("Removed %s document and %s nodes that were not linked to doc_ids from docstore"
+                          , doc_remove_count, node_remove_count)
+        
+
+        cache_remove_count = 0
+        redis_json_prefix = self.namespace + "RJ:"
+        for dtr in docs_to_remove:
+            rc=self.redis_client.execute_command("DEL", 'key', redis_json_prefix + dtr)
+            cache_remove_count += rc
+        self.logger.debug("Removed %s documents from cache", cache_remove_count)
+
 
         new_documents = []
         if docs_to_add:
-            # need to fix: this shoudl not read doc from file
-            # this needs to be converting a text to a document
-            # ############
-
-            new_documents = [d for d in document_list if d.metadata[f"{config.PROJECT_NAME}"]["_doc_id"] in docs_to_add]
-
+            if document_list:
+                new_documents = [d for d in document_list if d.metadata[f"{self.source.namespace}id"] in docs_to_add]
+            else:
+                #if incoming document_list is empty, then pull doc from source
+                new_documents = self.source.get_documents(doc_id_list=docs_to_add)
+            
             self.logger.debug("Updated docstore with %s new/modified documents", len(docs_to_add))
+
+        # cache the original document in Redis (if it's valid JSON)
+        try:
+            redis_json_prefix = self.namespace + "RJ:"
+            for new_doc in new_documents:
+                orig_doc: dict = dict(new_doc.text_resource or new_doc.text)
+                orig_doc["metadata"] = new_doc.metadata
+                orig_doc_id =  redis_json_prefix + new_doc.metadata[f"{self.namespace}id"]
+                self.redis_client.execute_command("JSON.SET", orig_doc_id, '$', json.dumps(orig_doc)) 
+        except Exception as e: 
+            self.logger.warning("Unable to process orig doc as JSON, will skip caching in Redis...", exc_info=e)
 
         # Insert new documents to vector_index_store
         self.indexes["vector_index"].insert_nodes(self.docs_to_nodes(new_documents))
         self.indexes["summary_index"].insert_nodes(self.docs_to_nodes(new_documents))
         self.indexes["keyword_index"].insert_nodes(self.docs_to_nodes(new_documents))
 
+        # Calculate and log elapsed time
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        self.logger.info("Document loading completed in %.2f seconds", elapsed_time)
+
         return None
+
+    def get_cached_doc_metadata(self) -> dict:
+        """Retrieve cached document metadata from Redis."""
+        redis_json_prefix = self.namespace + "RJ:"
+        metadata = {}
+        try:
+            redisjson_keys = self.redis_client.execute_command("KEYS", f"{redis_json_prefix}*")
+            for k in redisjson_keys:
+                b_value = self.redis_client.execute_command("JSON.GET", k)
+                cached_doc = json.loads(b_value)
+                if isinstance(k, bytes):
+                    k = k.decode('utf-8')
+                metadata[k] = cached_doc["metadata"]
+        except Exception as e:
+            self.logger.warning("Error retrieving cached doc metadata", exc_info=e)
+        return metadata
+
+
+    def get_cached_documents(self, doc_id_list: list = []) -> list[dict]:
+        redis_json_prefix = self.namespace + "RJ:"
+        docs = []
+        for doc_id in doc_id_list:
+            b_doc = self.redis_client.execute_command("JSON.GET", redis_json_prefix + doc_id, '$')
+            if b_doc:
+                docs.extend(json.loads(b_doc))
+
+        return docs
 
     def __init__(self, source: Source, index_schema: dict | None = None,
                  namespace: str = "", reset: bool = False) -> None:
@@ -468,7 +582,7 @@ class IndexStore():
                 self.name = index_schema["index"].get("name", self.namespace).removesuffix(".vector")
             else:
                 # otherwise use "default"
-                self.name = f"{self.namespace}:{self.__class__.__name__}"
+                self.name = f"{self.namespace}{self.__class__.__name__}"
 
         self.source = source
 
@@ -486,13 +600,13 @@ class IndexStore():
         self.logger.debug("Redis client created: %s", self.redis_client.ping())
 
         try:
-
-            if f"{self.name}.vector".encode('utf-8') not in self.redis_client.execute_command("FT._LIST"):
+            # try to reconnect to storage_context and retrieve docstore/index/vectorindex
+            if f"{self.namespace}vector".encode('utf-8') not in self.redis_client.execute_command("FT._LIST"):
                 raise IndexError("Vector Index not found in Redis")
 
             redis_keys = self.redis_client.execute_command("keys", f"{self.name}*")
             for store_type in ["doc", "index"]:
-                if f"{self.name}.{store_type}".encode('utf-8') not in redis_keys:
+                if f"{self.namespace}{store_type}".encode('utf-8') not in redis_keys:
                     raise IndexError(f"{store_type} store is not found in Redis")
 
             # if all 3 stores are found to be in Redis already:
@@ -534,7 +648,7 @@ class IndexStore():
         self.logger.debug("Loaded / refreshed documents for all indexes")
 
         # self.persist_dir = persist_dir or os.path.join(config.INDEX_STORE_PERSIST_DIR, self.name)
-        self.storage_context.persist()
+        #self.storage_context.persist()
 
     def query(self, question: str) -> str:
         """query the index about the content indexed"""

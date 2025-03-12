@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, Depends
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,42 +29,14 @@ templates = Jinja2Templates(directory="sweteam/bootstrap/templates")
 issue_manager = IssueManager()
 
 # Sample data for demonstration (replace with actual data from IssueManager)
-SAMPLE_ISSUES = [
-    {
-        "id": "ISSUE-1",
-        "title": "Fix login authentication bug",
-        "status": "In Progress",
-        "created": "2023-05-15",
-        "description": "Users are experiencing intermittent login failures when using SSO. This needs to be fixed urgently as it affects multiple enterprise customers.",
-        "comments": [
-            {
-                "author": "Jane Smith",
-                "date": "2023-05-16",
-                "content": "I've reproduced this issue on our staging environment. It seems to be related to the token validation process."
-            },
-            {
-                "author": "John Doe",
-                "date": "2023-05-17",
-                "content": "I've identified the root cause. The token expiration check is not handling timezone differences correctly."
-            }
-        ]
-    },
-    {
-        "id": "ISSUE-2",
-        "title": "Implement new dashboard features",
-        "status": "Open",
-        "created": "2023-05-18",
-        "description": "We need to add new visualization widgets to the dashboard as requested by the product team. This includes a pie chart for user demographics and a line chart for daily active users.",
-        "comments": [
-            {
-                "author": "Alex Johnson",
-                "date": "2023-05-19",
-                "content": "I've created the initial designs for these widgets. Please review them in Figma."
-            }
-        ]
-    }
-]
 
+def issue_list() -> list:
+    issues = issue_manager.get_cached_doc_metadata() or issue_manager.source.get_all_metadata()
+    issues_list = []
+    for k, v in issues.items():
+        issues_list.append({'id': v.get(f"{issue_manager.namespace}id", k),
+                            'title': (v.get('title') or v.get(f'{issue_manager.namespace}title'))[:80]})
+    return issues_list
 
 class ChatMessage(BaseModel):
     message: str
@@ -93,11 +65,8 @@ async def get_issue_chat_page(request: Request):
         >>> response.status_code
         200
     """
-    issues = issue_manager.source.get_all_metadata()
-    issues_list = []
-    for k, v in issues.items():
-        issues_list.append({'id': v.get(f"{config.PROJECT_NAME}_doc_id", k),
-                            'title': (v.get('title') or v.get('Summary') or v.get("Description", ""))[:80]})
+    
+    issues_list = issue_list()
     return templates.TemplateResponse(
         "issue_chat.html",
         {"request": request, "issues": issues_list}
@@ -106,6 +75,7 @@ async def get_issue_chat_page(request: Request):
 
 @app.get("/api/issues/{issue_id}")
 async def get_issue(issue_id: str):
+    import json
     """
     Get details for a specific issue.
 
@@ -125,15 +95,84 @@ async def get_issue(issue_id: str):
         'ISSUE-1'
     """
     try:
-        found_issues = issue_manager.source.get_documents([issue_id])
-        if found_issues:
-            found_issue = found_issues[0]
+        cached_issues = issue_manager.get_cached_documents([issue_id])
+        if cached_issues:
+            found_issue_raw = cached_issues[0]
+            found_issue_metadata = found_issue_raw["metadata"]
+        else:
+            found_issues = issue_manager.source.get_documents([issue_id])
+            found_issue_raw = dict(found_issues[0]) if found_issues else {}
+            found_issue_metadata = found_issue_raw["metadata"]
+
+        if "text" in found_issue_raw:
+            # if this is direct loaded from file by SimpleDirectoryReader .etc
+            found_issue = json.loads(found_issue_raw.get("text"))
+        else:
+            # if this is created by Document(...)
+            found_issue = json.loads(found_issue_raw.get("text_resource"))
+    
+        if found_issue:
             issue = {}
             issue["id"] = issue_id
-            issue["title"] = getattr(found_issue, "title", "no title")
-            issue["created"] = getattr(found_issue, f"{config.PROJECT_NAME}_doc_created_at", "unknown")
-            issue["status"] = getattr(found_issue, f"status", "unknown")
-            issue["description"] = getattr(found_issue, f"description", "") or getattr(found_issue, f"text", "n/a")
+            issue["title"] = found_issue_metadata.get(f"{issue_manager.namespace}title", "no title")
+            issue["created"] = found_issue_metadata.get(f"{issue_manager.namespace}created_at", "unknown")
+            issue["updated"] = found_issue_metadata.get(f"{issue_manager.namespace}updated_at", "unknown")
+            issue["status"] = found_issue_metadata.get(f"{issue_manager.namespace}status", "unknown")
+            
+            # Get the description or text content
+            description = found_issue.get("description") or found_issue.get("text", 'n/a')
+            # If the description is a string that looks like JSON, try to parse it
+            if isinstance(description, str):
+                try:
+                    # Try to parse as JSON
+                    import json
+                    json_data = json.loads(description)
+                    issue["description"] = json_data
+                except json.JSONDecodeError:
+                    # If not valid JSON, keep as string
+                    issue["description"] = description
+            else:
+                issue["description"] = description
+
+            # Get the comment
+            comments = found_issue.get("comment") or found_issue.get("comments", 'n/a')
+            # If the comment is a string that looks like JSON, try to parse it
+            if isinstance(comments, str):
+                try:
+                    # Try to parse as JSON
+                    import json
+                    json_data = json.loads(comments)
+                    issue["comments"] = json_data
+                except json.JSONDecodeError:
+                    # If not valid JSON, keep as string
+                    issue["comments"] = comments
+            else:
+                issue["comments"] = comments
+
+            # Get the changelog
+            changelog = found_issue.get("changelog") or found_issue.get("updates", 'n/a')
+            # If the changelog is a string that looks like JSON, try to parse it
+            if isinstance(changelog, str):
+                try:
+                    # Try to parse as JSON
+                    import json
+                    json_data = json.loads(changelog)
+                    issue["changelog"] = json_data
+                except json.JSONDecodeError:
+                    # If not valid JSON, keep as string
+                    issue["changelog"] = changelog
+            else:
+                issue["changelog"] = changelog
+
+            # everything other than [description], [comments], [changelog]
+            # goes to attributes
+            # everything other than [description], [comments], [changelog]
+            # goes to attributes
+            issue["attributes"] = {}
+            for key, value in found_issue.items():
+                if key not in ["description", "comments", "changelog"]:
+                    issue["attributes"][key] = value            
+
             return issue
     except Exception as e:
         logger.warning("Error retrieving document %s from the source, due to %s", issue_id, e, exc_info=e)
@@ -215,11 +254,7 @@ async def list_issues():
     """
     # In a real implementation, you would fetch issues from the IssueManager
     # For now, we'll use sample data
-    issues = issue_manager.source.get_all_metadata()
-    issues_list = []
-    for k, v in issues.items():
-        issues_list.append({'id': v.get(f"{config.PROJECT_NAME}_doc_id", k),
-                            'title': (v.get('title') or v.get('Summary') or v.get("Description", ""))[:80]})
+    issues_list = issue_list()
     return issues_list
 
 
