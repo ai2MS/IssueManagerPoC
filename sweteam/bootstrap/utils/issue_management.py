@@ -40,7 +40,7 @@ class JIRA(Source):
         key_prefix = f"{self.namespace}"
         metadata={}
         for k, v in self.field_mapping.items():
-            metadata[key_prefix + k]=get_dot_notation_value(issue, v)
+            metadata[key_prefix + k]=get_dot_notation_value(issue, v, 'n/a')
         return metadata
 
     def get_all_documents(self) -> list[Document]:
@@ -185,6 +185,39 @@ class JIRA(Source):
 
         returned_issues = json.loads(response.text).get("issues", [])
         issues_to_return = []
+        def flattern_comment(content_obj, content_str: str = "") -> str:
+            if isinstance(content_obj, dict):
+                for content in content_obj.get("content", []):
+                    content_str += flattern_comment(content)
+
+            match content_obj.get('type', 'n/a'):
+                case 'doc':
+                    return content_str + "\n===EOF===\n"
+                case 'paragraph':
+                    return content_str + "\n\n"
+                case 'text':
+                    return content_obj.get("text") or str(content_obj)
+                case 'inclienCard':
+                    return str(content_obj.get('attrs'))
+                case 'media':
+                    media_attrs = content_obj.get('attrs', {})
+                    media_type = media_attrs.get('type')
+                    media_details = ""
+                    for k, v in content_obj.get('attrs', {}).items():
+                        if k in ['type']: continue
+                        media_details += "," if media_details else ""
+                        media_details += f"{k}:{v}"
+                    return f"media:<{media_type}: <{media_details}>, {content_str}>"
+                case 'mediaSingle':
+                    return f"mediaSingle:<{content_str}>"
+                case 'mediaGroup':
+                    return f"mediaGroup:<{content_str}>"
+                case 'hardBreak':
+                    return "\n"
+                case _:
+                    return str(content_obj)
+
+
         for ri in returned_issues:
             # separate customfields into its own sub group
             issue_temp = {"id": ri["id"],
@@ -196,7 +229,14 @@ class JIRA(Source):
                 elif fk == "comment" and "comments" in fv:
                     # Jira "comments" is an array under key "comment", 
                     # we pull it to field level 
-                    issue_temp["comments"] = fv["comments"]
+                    comments = []
+                    for comment in fv["comments"]:
+                        comment['author'] = comment['author']['displayName']
+                        comment['date'] = comment.get('updated') or comment.get('created')
+                        comment['content'] = flattern_comment(comment["body"])
+                        comments.append(comment)
+                    
+                    issue_temp["comments"] = comments
                 else:
                     issue_temp[fk] = fv
                 

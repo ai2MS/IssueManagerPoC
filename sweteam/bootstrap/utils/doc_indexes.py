@@ -532,9 +532,11 @@ class IndexStore():
             self.logger.warning("Unable to process orig doc as JSON, will skip caching in Redis...", exc_info=e)
 
         # Insert new documents to vector_index_store
-        self.indexes["vector_index"].insert_nodes(self.docs_to_nodes(new_documents))
-        self.indexes["summary_index"].insert_nodes(self.docs_to_nodes(new_documents))
-        self.indexes["keyword_index"].insert_nodes(self.docs_to_nodes(new_documents))
+        new_nodes = self.docs_to_nodes(new_documents)
+
+        self.indexes["vector_index"].insert_nodes(new_nodes)
+        self.indexes["summary_index"].insert_nodes(new_nodes)
+        self.indexes["keyword_index"].insert_nodes(new_nodes)
 
         # Calculate and log elapsed time
         end_time = time.time()
