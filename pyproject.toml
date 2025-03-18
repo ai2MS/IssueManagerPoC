@@ -23,6 +23,7 @@ dependencies = [
     "llama-index-storage-docstore-redis>=0.3.0",
     "llama-index-storage-index-store-redis>=0.4.0",
     "llama-index-readers-json>=0.3.0",
+    "aiofiles>=24.1.0",
 ]
 
 [dependency-groups]

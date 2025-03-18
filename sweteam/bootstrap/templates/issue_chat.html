@@ -46,9 +46,19 @@
             <div class="chat-header">
                 <h2>AI Assistant</h2>
             </div>
-            
+
+            <div class="evaluation-criteria">
+                <label for="evaluation-criteria" style="vertical-align: top;">Evaluation Criteria:</label>
+                <textarea id="evaluation-criteria" placeholder="Enter evaluation criteria..."></textarea>
+            </div>
+                        
             <div class="chat-messages" id="chat-messages">
                 <!-- Messages will be added here dynamically -->
+                <div class="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
             </div>
             
             <form id="chat-form" class="chat-input">

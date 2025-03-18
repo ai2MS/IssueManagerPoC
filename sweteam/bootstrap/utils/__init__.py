@@ -44,7 +44,17 @@ def timed_execution(f: Callable, *args, **kwargs) -> Any:
     return_value = f(*args, **kwargs)
     end_time = time.time()
     elapsed_time = end_time - start_time
-    self.logger.info("Timed Execution of %s completed in %.2f seconds", f.__name__, elapsed_time)
+    logger.info("Timed Execution of %s completed in %.2f seconds", f.__name__, elapsed_time)
+    return return_value
+
+async def timed_async_execution(f: Callable, *args, **kwargs) -> Any:
+    import time
+    logger.info("Start timed Async execution of %s...", f.__name__)
+    start_time = time.time()
+    return_value = await f(*args, **kwargs)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.info("Timed Async Execution of %s completed in %.2f seconds", f.__name__, elapsed_time)
     return return_value
 
 class Action(Enum):

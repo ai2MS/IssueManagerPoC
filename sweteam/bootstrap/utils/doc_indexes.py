@@ -9,6 +9,10 @@ index for querying the issues. The index is created from the documents in the is
 
 """
 from abc import ABC, abstractmethod
+
+from llama_index.core.indices.base import BaseIndex
+import nest_asyncio
+
 import os
 import json
 import hashlib
@@ -21,16 +25,19 @@ from llama_index.core.retrievers import QueryFusionRetriever
 
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.storage.docstore.redis.base import RedisKVStore
 from llama_index.vector_stores.redis import RedisVectorStore
 from llama_index.storage.index_store.redis import RedisIndexStore
 from llama_index.storage.docstore.redis import RedisDocumentStore
 
 from redis import Redis
+nest_asyncio.apply()
+from redis.asyncio import Redis as AsyncRedis
 
 from ..config import config
 from .log import get_logger, get_default_logger
+from . import timed_async_execution, timed_execution
 from .file_utils import dir_contains
-
 
 # bge-m3 embedding model uses 1024 dimmesions
 embedding_dim = 1024
@@ -55,7 +62,7 @@ class Source(ABC):
     a standard format that IssueManager can index.
     """
     @abstractmethod
-    def get_all_documents(self) -> list[Document]:
+    async def get_all_documents(self) -> list[Document]:
         """Returns all the documents as whole as a list
         The IssueManager will need the source document (i.e. each ticket) to be a Document object
         which is defined by llama-index, methods like SimpleDirectoryReader().load_data() will 
@@ -65,18 +72,10 @@ class Source(ABC):
         Returns:
             list[Document]
         """
-        """ Additional documentation:
-            It is STRONGLY recommended to suppliment the Document objects with additional metadata
-            these metadata helps identify if a document has been updated without doing the full 
-            document read.
-            Such metadata will be stored as part of the Document.metadata collection (which is a flat 
-            key:value pair list), the key will be prefixed with f"{self.namespace}" and only if 
-            all the values of such keys match, it would be consdiered the Document has not changed. 
-        """
         pass
 
     @abstractmethod
-    def get_all_metadata(self) -> dict:
+    async def get_all_metadata(self) -> dict:
         """Returns all the metadata of each document (i.e. an issue, or a file) should
         be sufficient to identify if the document has changed without having to go 
         through the full cycle of retrieving the full document from the source.
@@ -89,7 +88,7 @@ class Source(ABC):
         pass
 
     @abstractmethod
-    def get_documents(self, doc_id_list: list[str]) -> list[Document]:
+    async def get_documents(self, doc_id_list: list[str]) -> list[Document]:
         """Retrieve a group of documents by their ids. Should be a subset of what get_all_documents return
         which means the metadata should be provided consistently as the get_all_documents()
         Args:
@@ -101,9 +100,8 @@ class Source(ABC):
 
 
 class Files(Source):
-    """Interface class to abstract files to documents converstion
-    it uses SImpleDirectoryReader() to read all documents preserving their full_path
-
+    """Interface class to abstract files to documents conversion
+    it uses SimpleDirectoryReader() to read all documents preserving their full_path
     """
 
     def __init__(self, path_: str, namespace: str = ""):
@@ -114,19 +112,8 @@ class Files(Source):
             self.logger.info("Issue directory does not exist, creating it...")
             os.makedirs(self.path, exist_ok=True)
 
-    def get_file_hash(self, file_path: str, algorithm: str = 'sha256', buffer_size: int = 65536) -> str:
-        """
-        Calculate the hash of a file efficiently using buffered reading.
-
-        Args:
-            file_path (str): Path to the file
-            algorithm (str): Hash algorithm to use ('md5', 'sha1', 'sha256', etc.)
-            buffer_size (int): Size of chunks to read at once
-
-        Returns:
-            FileInfo: where hash: Hexadecimal digest of the file hash and 
-                            title: short description of the file content
-        """
+    async def get_file_hash(self, file_path: str, algorithm: str = 'sha256', buffer_size: int = 65536) -> str:
+        """Calculate the hash of a file efficiently using buffered reading."""
         hash_func = hashlib.new(algorithm)
 
         with open(file_path, 'rb') as f:
@@ -138,42 +125,39 @@ class Files(Source):
 
         return hash_func.hexdigest()
 
-    def get_all_documents(self) -> list[Document]:
-        """return list of llama-index Document objects with special meta data
-        """
+    async def get_all_documents(self) -> list[Document]:
+        """Return list of llama-index Document objects with special meta data"""
         documents = []
         if os.path.exists(self.path) and dir_contains(self.path, recursive=True):
             self.logger.info("Issue directory <%s> found, using it...", self.path)
-            documents = SimpleDirectoryReader(self.path, recursive=True).load_data()
+            documents = await SimpleDirectoryReader(self.path, recursive=True).aget_data()
             for document in documents:
                 if hasattr(document, "metadata"):
                     file_path = document.metadata["file_path"]
                     metadata = {
                         "id": file_path.removeprefix(self.path),
                         "size": document.metadata["file_size"]}
-                    self.get_metadata(os.stat(file_path), metadata)
+                    await self.get_metadata(os.stat(file_path), metadata)
                     for k, v in metadata.items():
                         document.metadata[f"{self.source.namespace}{k}"] = v
-
                 else:
                     self.warning("Document %s does not have metadata, this is strange!", document)
 
         return documents
 
-    def get_documents(self, doc_id_list: list) -> list[Document]:
-        """Retrieve standard file system level info as file metadata
-        """
+    async def get_documents(self, doc_id_list: list) -> list[Document]:
+        """Retrieve standard file system level info as file metadata"""
         documents = []
         doc_path_list = [os.path.join(self.path, id) for id in doc_id_list]
         if any([os.path.exists(f) for f in doc_path_list]):
-            documents = SimpleDirectoryReader(input_files=doc_path_list).load_data()
+            documents = await SimpleDirectoryReader(input_files=doc_path_list).aget_data()
             for document in documents:
                 if hasattr(document, "metadata"):
                     file_path = document.metadata["file_path"]
                     metadata = {
                         "id": file_path.removeprefix(self.path),
                         "size": document.metadata["file_size"]}
-                    self.get_metadata(os.stat(file_path), metadata)
+                    await self.get_metadata(os.stat(file_path), metadata)
                     try:
                         file_content = json.loads(document.text)
                     except Exception as e:
@@ -183,43 +167,37 @@ class Files(Source):
                     metadata["title"] = file_content.get("title") or file_content.get("Summary")
                     for k, v in metadata.items():
                         document.metadata[f"{self.source.namespace}{k}"] = v
-
                 else:
                     self.warning("Document %s does not have metadata, this is strange!", document)
 
         return documents
 
-
-    def get_metadata(self, os_stat:object, metadata:dict = {}) -> dict:
-        """return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}
-        """
+    async def get_metadata(self, os_stat:object, metadata:dict = {}) -> dict:
+        """Return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}"""
         metadata.setdefault(f"{self.namespace}size", os_stat.st_size)
         metadata.setdefault(f"{self.namespace}created_at", os_stat.st_ctime)
         metadata.setdefault(f"{self.namespace}updated_at", os_stat.st_mtime)
-        metadata.setdefault(f"{self.namespace}hash", self.get_file_hash(file_path))
+        metadata.setdefault(f"{self.namespace}hash", await self.get_file_hash(file_path))
         
         return metadata
 
-
-    def get_all_metadata(self) -> dict:
-        """return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}
-        """
+    async def get_all_metadata(self) -> dict:
+        """Return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}"""
         file_metadata = {}
 
-        def scan_dir_populate_metadata(dir_path):
+        async def scan_dir_populate_metadata(dir_path):
             nonlocal file_metadata
             for entry in os.scandir(dir_path):
                 if entry.is_file():  # Check if it's a file
                     file_path = os.path.abspath(entry.path)
                     _doc_id = file_path.removeprefix(dir_path)
                     metadata = {f"{self.namespace}id": _doc_id}
-                    self.get_metadata(os.stat(file_path), metadata)
+                    await self.get_metadata(os.stat(file_path), metadata)
                     file_metadata[_doc_id] = metadata
                 elif entry.is_dir():  # Recurse into subdirectories
-                    scan_dir_populate_metadata(entry.path)
+                    await scan_dir_populate_metadata(entry.path)
 
-        scan_dir_populate_metadata(self.path)
-
+        await scan_dir_populate_metadata(self.path)
         return file_metadata
 
 
@@ -230,30 +208,106 @@ class IndexStore():
     Then create a fusion query engine to enable query using all 3 indexes. 
     """
 
-    def get_index_id_from_name(self, name: str) -> str:
-        """retrieve mapping between a given index_name to index_id. 
-        The map should be persisted across program start/restart so that we can continue 
-        Typical implementation (as below) is using Redis K:V pair
-        """
-        namespace = f"{self.name}:registry" if hasattr(self, "name") else "index_registry"
-        return self.redis_client.get(f"{namespace}index_id:{name}")
+    def __init__(self, source: Source, index_schema: dict | None = None,
+                 namespace: str = "", reset: bool = False) -> None:
+        self.logger = get_default_logger(self.__class__.__name__)
+        self.namespace = namespace or config.PROJECT_NAME
+        self.index_schema = index_schema
+        if (not hasattr(self, "name")):
+            if "index" in index_schema:
+                self.name = index_schema["index"].get("name", self.namespace).removesuffix(".vector")
+            else:
+                self.name = f"{self.namespace}{self.__class__.__name__}"
 
-    def set_index_id_name_mapping(self, name: str, id: str):
-        """Record index name to id mapping. A typeical implementation is using Redis
-        """
-        namespace = f"{self.name}:registry" if hasattr(self, "name") else "index_registry"
-        self.redis_client.set(f"{namespace}index_id:{name}", id)
+        self.source = source
+        self.indexes: dict[str: SummaryIndex | KeywordTableIndex | VectorStoreIndex] = {}
+        self.reset = reset
+        
+        # Create Redis clients
+        self.logger.debug("creating Redis clients... %s:%s", config.REDIS_HOST, config.REDIS_PORT)
+        self.redis_client = Redis(
+            host=config.REDIS_HOST,
+            port=config.REDIS_PORT,
+            password=config.REDIS_PASSWORD,
+            username=config.REDIS_USERNAME,
+            db=0
+        )
+        self.async_redis_client = AsyncRedis(
+            host=config.REDIS_HOST,
+            port=config.REDIS_PORT,
+            password=config.REDIS_PASSWORD,
+            username=config.REDIS_USERNAME,
+            db=0
+        )
+        self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
+            async_redis_client=self.async_redis_client)
+
+
+    async def initialize(self) -> None:
+        """Initialize the IndexStore asynchronously"""
+        self.logger.debug("Redis clients created: %s", await self.async_redis_client.ping())
+
+        try:
+            # try to reconnect to storage_context and retrieve vectorindex/summary&keyword index/docs
+            index_list = await self.async_redis_client.execute_command("FT._LIST")
+            if f"{self.namespace}vector".encode('utf-8') not in index_list:
+                raise IndexError("Vector Index not found in Redis")
+
+            redis_keys = await self.async_redis_client.execute_command("keys", f"{self.namespace}*")
+            for store_type in ["doc", "index"]:
+                if f"{self.namespace}/{store_type}".encode('utf-8') not in redis_keys:
+                    raise IndexError(f"{store_type} store is not found in Redis")
+
+            # if all 3 stores are found to be in Redis already:
+            self.storage_context = await self.connect_to_redis_stores()
+
+            self.indexes["vector_index"] =  VectorStoreIndex.from_vector_store(
+                vector_store=self.storage_context.vector_store
+            )
+            self.indexes["summary_index"] =  load_index_from_storage(
+                self.storage_context, index_id=f"{self.name}_summary"
+            )
+            self.indexes["keyword_index"] = load_index_from_storage(
+                self.storage_context, index_id=f"{self.name}_keyword"
+            )
+
+            # Create retrievers from each index
+            summary_retriever = self.indexes["summary_index"].as_retriever()
+            vector_retriever = self.indexes["vector_index"].as_retriever()
+            keyword_retriever = self.indexes["keyword_index"].as_retriever()
+
+            # Combine retrievers using fusion
+            fusion_retriever = QueryFusionRetriever(
+                retrievers=[summary_retriever, vector_retriever, keyword_retriever],
+                similarity_top_k=3,
+                num_queries=1,
+                mode="simple"
+            )
+
+            # Create a query engine from the fusion retriever
+            self.query_engine = RetrieverQueryEngine.from_args(
+                retriever=fusion_retriever
+            )
+
+        except Exception as e:
+            # if storage_context can't be loaded from storage, call create_index() to build it.
+            self.query_engine = await self.create_index(force=(self.reset is True))
+
+        self.logger.debug(f"initialized Issue Index Vector Store...")
+
+        await self.load_documents(await self.source.get_all_documents(), force=self.reset)
+        self.logger.debug("Loaded / refreshed documents for all indexes")
 
     def docs_to_nodes(self, documents) -> list[Document]:
+        """Convert documents to nodes."""
         nodes = []
         try:
             nodes = JSONNodeParser().get_nodes_from_documents(documents)
-            self.logger.debug("Loaded %s document as %s nodes.", len(documents), len(nodes))
+            self.logger.debug("Parsed %s document as %s nodes.", len(documents), len(nodes))
         except Exception as e:
             self.logger.warning("could not load all files as json, parsing individually...")
             for document in documents:
                 try:
-                    # validate if the document is proper JSON
                     json.JSONDecoder().decode(document)
                     nodes_ = JSONNodeParser().get_nodes_from_documents(document)
                     self.logger.debug("document parsed as %s JSON nodes", len(nodes_))
@@ -264,69 +318,62 @@ class IndexStore():
                     nodes.extend(nodes_)
         return nodes
 
-    def connect_to_redis_stores(self) -> StorageContext:
-        # create the vector store wrapper
-        vector_store = RedisVectorStore(redis_client=self.redis_client, overwrite=True,
-                                        schema=self.index_schema)
+    async def connect_to_redis_stores(self) -> StorageContext:
+        """Connect to Redis stores and return storage context."""
+        #VectorStore does not support using redis_kvstore to provide both sync and async clients
+        vector_store = RedisVectorStore(
+            redis_client=self.redis_client,
+            overwrite=False,
+            schema=self.index_schema
+        )
 
-        index_store = RedisIndexStore.from_redis_client(
-            redis_client=self.redis_client, namespace=f"{self.namespace}index")
+        #self.redis_kvstore is configured with both sync and async clients
+        index_store = RedisIndexStore(redis_kvstore=self.redis_kvstore,
+            namespace=f"{self.namespace}"
+        )
+        
+        doc_store = RedisDocumentStore(redis_kvstore=self.redis_kvstore,
+            namespace=f"{self.namespace}"
+        )
 
-        doc_store = RedisDocumentStore.from_redis_client(
-            redis_client=self.redis_client, namespace=f"{self.namespace}doc")
-        # load storage context
+        return StorageContext.from_defaults(
+            docstore=doc_store,
+            vector_store=vector_store,
+            index_store=index_store
+        )
 
-        storage_context = StorageContext.from_defaults(
-            docstore=doc_store, vector_store=vector_store, index_store=index_store)
-
-        return storage_context
-
-    def create_index(self, force: bool = False):
-
-        if force is True:
+    async def create_index(self, force: bool = False):
+        """Create or recreate the indexes."""
+        if force:
             self.logger.info("force=%s specified, flushing all in Redis", force)
-            self.redis_client.execute_command("flushall")
+            await self.async_redis_client.execute_command("flushall")
 
-        # Check if the index already exists
-        # list existing indexes
-        index_list = self.redis_client.execute_command("FT._LIST")
+        index_list = await self.async_redis_client.execute_command("FT._LIST")
         self.logger.debug("Existing indexes: %s", index_list)
 
-        # if vector index already in the existing indexes list, check structure compatibility
-        if f"{self.name}.vector".encode('utf-8') in index_list:
-            self.logger.info("Index %s.vector already exists, checking compatibility...", self.name)
-            # FT.INFO returns a list of key-value pairs if index exists.
-            info = self.redis_client.execute_command("FT.INFO", f"{self.name}.vector")
-            # self.logger.debug("Index info: %s", info)
-
-            # Extract the stored schema from FT.INFO output.
+        if f"{self.namespace}vector".encode('utf-8') in index_list:
+            self.logger.info("Index %svector already exists, checking compatibility...", self.namespace)
+            info = await self.async_redis_client.execute_command("FT.INFO", f"{self.namespace}vector")
             info_dict = {info[i]: info[i+1] for i in range(0, len(info), 2)}
-            # self.logger.debug("info dict: %s", info_dict)
             stored_attributes = info_dict.get(b"attributes", [])
-            # self.logger.debug("Stored attributes: %s", stored_attributes)
-            # Normalize Redis stored attributes: create a set with (name, type)
             list_of_dict_attributes = [{attr[i]: attr[i+1] for i in range(0, len(attr), 2)}
                                        for attr in stored_attributes]
-            stored_fields_set = {(attr.get(b"identifier").decode('utf-8').lower(), attr.get(b"type").decode().lower())
+            stored_fields_set = {(attr.get(b"identifier").decode().lower(), attr.get(b"type").decode().lower())
                                  for attr in list_of_dict_attributes}
-            # Retrieve the defined schema as a dict. Assume the IndexSchema has a to_dict() method.
             defined_schema = self.index_schema.to_dict() if hasattr(
                 self.index_schema, "to_dict") else self.index_schema
             defined_fields = defined_schema.get("fields", [])
             defined_fields_set = {(field.get("name"), field.get("type")) for field in defined_fields}
             if stored_fields_set == defined_fields_set:
                 self.logger.info("Index %s.vector is compatible with defined schema", self.name)
-                # should check changes and refresh file if needed.
             else:
                 self.logger.warning(
                     "data in the index is imcompatible with defined schema: index_store=%s, instead of %s", stored_fields_set, defined_fields_set)
-                # Drop the index and recreate it
-                self.redis_client.execute_command("FT.DROPINDEX", f"{self.name}.vector")
-                index_list = self.redis_client.execute_command("FT._LIST")
-                self.logger.info("Index %s.vector dropped. Remaining indexes are:%s", self.name, index_list)
+                await self.async_redis_client.execute_command("FT.DROPINDEX", f"{self.namespace}vector")
+                index_list = await self.async_redis_client.execute_command("FT._LIST")
+                self.logger.info("Index %svector dropped. Remaining indexes are:%s", self.namespace, index_list)
 
-        # since we used redis_client directly manipulate Redis content, let's reconnect:
-        self.storage_context = self.connect_to_redis_stores()
+        self.storage_context = await self.connect_to_redis_stores()
 
         vector_index = VectorStoreIndex.from_vector_store(
             vector_store=self.storage_context.vector_store
@@ -335,42 +382,34 @@ class IndexStore():
         self.indexes["vector_index"] = vector_index
         all_nodes = []
 
-        # try load summary index, if fail, create empty one
         try:
-            # load SummaryIndex from storage
             summary_index = load_index_from_storage(
                 storage_context=self.storage_context,
-                index_id=self.get_index_id_from_name(f"{self.name}_summary")
+                index_id=f"{self.name}_summary"
             )
-            # summary_index.refresh_ref_docs(new_documents)
         except Exception as e:
             self.logger.warning(
                 "Unable to load and refresh summaryindex from storage, will re-create. Error detail: %s ", e)
-            # completely rebuild the index
             summary_index = SummaryIndex(
                 nodes=all_nodes,
-                storage_context=self.storage_context
+                storage_context=self.storage_context, use_async=True
             )
-            self.set_index_id_name_mapping(f"{self.name}_summary", summary_index.index_id)
+            summary_index.set_index_id(f"{self.name}_summary")
         self.indexes["summary_index"] = summary_index
 
-        # try load keyword index, if fail, create empty one
         try:
-            # load KeywordTableIndex from storage
             keyword_index = load_index_from_storage(
                 storage_context=self.storage_context,
-                index_id=self.get_index_id_from_name(f"{self.name}_keyword")
+                index_id=f"{self.name}_keyword"
             )
-            # keyword_index.refresh_ref_docs(new_documents)
         except Exception as e:
             self.logger.warning(
-                "Unable to load and refresh keywordindex from storage, will re-create. Error detail: %s", e, exc_info=e)
-            # completely rebuild the index
+                "Unable to load and refresh keywordindex from storage, will re-create. Error detail: %s", e)
             keyword_index = SimpleKeywordTableIndex(
                 nodes=all_nodes,
                 storage_context=self.storage_context
             )
-            self.set_index_id_name_mapping(f"{self.name}_keyword", keyword_index.index_id)
+            keyword_index.set_index_id(f"{self.name}_keyword")
         self.indexes["keyword_index"] = keyword_index
 
         # Create retrievers from each index
@@ -381,9 +420,9 @@ class IndexStore():
         # Combine retrievers using fusion
         fusion_retriever = QueryFusionRetriever(
             retrievers=[summary_retriever, vector_retriever, keyword_retriever],
-            similarity_top_k=5,  # Number of results from each retriever
-            num_queries=1,       # Number of query variations to generate
-            mode="simple"        # Can be "simple" or "reciprocal_rank_fusion"
+            similarity_top_k=5,
+            num_queries=1,
+            mode="simple"
         )
 
         # Create a query engine from the fusion retriever
@@ -393,48 +432,162 @@ class IndexStore():
 
         return fusion_query_engine
 
-    def load_documents(self, document_list: list[Document] = [], force: bool = False):
-        """Scan the given directory and load the files in it to the self.index doc store
-        """
+    async def delete_docs(self, doc_id_set:set = set()):
+        # doc_remove_count = 0
+        # node_remove_count = 0
+        # need_to_delete_by_nodes = True
+        # if hasattr(self.storage_context.vector_store, "adelete"):
+        #     need_to_delete_by_nodes = False
+        #     for doc_to_remove in doc_id_list:
+        #         self.logger.debug("Removing %s from vector_store", doc_to_remove)
+        #         try:
+        #             await self.storage_context.vector_store.adelete(ref_doc_id=doc_to_remove)
+        #             doc_remove_count += 1
+        #         except Exception as e:
+        #             self.logger.warning("Removing %s from VectorStore run into error, will try to delete nodes "
+        #                                 "with metadata pointing to it...", doc_to_remove, exc_info=e)
+        #             need_to_delete_by_nodes = True
+        # if need_to_delete_by_nodes:  
+        #     if hasattr(self.storage_context.vector_store, "delete_notes"):
+        #         nodes_to_remove = set()
+        #         for node in all_nodes:
+        #             node_id = node.node_id
+        #             if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove):
+        #                  nodes_to_remove.add(node_id)
+        #                  node_remove_count += 1
+        #         await self.storage_context.vector_store.delete_nodes(node_ids=nodes_to_remove)
+        #     else:
+        #         raise TypeError(f"VectorStore {self.storage_context.vector_store} does not support delete_notes")
+
+        # self.logger.debug("Removed %s document and %s nodes from vector store", 
+        #                  doc_remove_count, node_remove_count)
+
+        # record doc_id_list to remove in Redis so even if program restarts midway, we know there are docs to remove
+
+        deleting_list_key = f'{self.namespace}{self.name}_deleting_docs'
+
+        unfinished_deletes_b = self.redis_client.get(deleting_list_key)
+        unfinished_deletes = json.loads(unfinished_deletes_b) if unfinished_deletes_b else []
+
+        docs_to_remove = list(doc_id_set.union(unfinished_deletes))
+        
+        self.redis_client.set(deleting_list_key, json.dumps(docs_to_remove))
+        for index_name, index in self.indexes.items():
+            docs_removed=0
+            nodes_removed=0
+            need_to_remove_nodes_docs = []
+            #Try gracefully delete using index, in exception, fallback to per node removal
+            for doc_id in docs_to_remove:
+                try:
+                    if hasattr(index, 'adelete_ref_doc'):
+                        await index.adelete_ref_doc(ref_doc_id=doc_id)
+                        docs_removed += 1
+                    elif hasattr(index, 'adelete'):
+                        await index.adelete(doc_id=doc_id)
+                        docs_removed += 1
+                    else:
+                        index.delete_ref_doc(ref_doc_id=doc_id)
+                        docs_removed += 1
+                except Exception as e:
+                    self.logger.warning("Deleting doc %s failed with %s, trying to use it as Source Doc ID..."
+                                        , doc_id, e)
+                    for doc_id_mapped in [dk for dk, dv in index.docstore.docs.items()
+                                              if dv.metadata[f'{self.namespace}id'] == doc_id]:
+                        try:
+                            index.delete_ref_doc(ref_doc_id=doc_id_mapped)
+                            docs_removed += 1
+                        except Exception as e:
+                            self.logger.warning("Deleting doc %s as source id also failed with %s, try deleting nodes"
+                                                , doc_id, e)
+                            need_to_remove_nodes_docs.append(doc_id)
+        
+
+            doc_nodes_to_remove = []
+            index_nodes = (index.index_struct.nodes if hasattr(index.index_struct, 'nodes') 
+                           else index.index_struct.nodes_dict.keys() if hasattr(index.index_struct, 'nodes_dict')
+                           else index.docstore.docs)
+            for node_id in index_nodes:
+                if (index.docstore.get_node(node_id).metadata[f"{self.namespace}id"] in need_to_remove_nodes_docs
+                    or index.docstore.get_node(node_id).ref_doc_id in need_to_remove_nodes_docs):
+                    doc_nodes_to_remove.append(node_id)
+            try:
+                delete_methods = ['adelete_ref_doc', 'adelete_notes', 'adelete']
+                for dm in delete_methods:
+                    if hasattr(index, dm):
+                        func = getattr(index, dm)
+                        break
+                await func(doc_nodes_to_remove)
+            except Exception as e:
+                self.logger.warning("Asyn deleting nodes methods are unavailable, try sync deletion")
+                delete_methods = ['delete_ref_doc', 'delete_notes', 'delete']
+                for dm in delete_methods:
+                    if hasattr(index, dm):
+                        func = getattr(index, dm)
+                        break
+                func(node_ids=doc_nodes_to_remove)
+
+            nodes_removed += len(doc_nodes_to_remove)
+            self.logger.debug("Removed %s docs and %s nodes from %s.", docs_removed, nodes_removed, index.index_id)
+        
+        # Delete from doc store
+        doc_remove_count = 0
+        node_remove_count = 0
+        need_to_delete_by_nodes = False
+        for doc_to_remove in docs_to_remove:
+            self.logger.debug("Removing %s from docstore...", doc_to_remove)
+            try:
+                await self.storage_context.docstore.adelete_ref_doc(ref_doc_id=doc_to_remove)
+                doc_remove_count += 1
+            except Exception as e:
+                self.logger.warning("Removing %s from DocStore run into error, will try to delete nodes "
+                                        "with metadata pointing to it...", doc_to_remove, exc_info=e)
+                need_to_delete_by_nodes = True
+
+        if need_to_delete_by_nodes: 
+            for node in all_nodes:
+                node_id = node.node_id
+                if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove
+                    or node.ref_doc_id in docs_to_remove):
+                    node_remove_count += 1
+                    self.logger.debug("Removing %s belonging to DocId %s..."
+                                      , node_id, node.metadata.get(f"{self.source.namespace}id"))
+                    await self.storage_context.docstore.adelete_document(doc_id=node_id)
+
+        self.logger.debug("Removed %s document and %s nodes from docstore",
+                         doc_remove_count, node_remove_count)
+        self.redis_client.set(deleting_list_key, '[]')
+
+
+    async def load_documents(self, document_list: list[Document] = [], force: bool = False):
+        """Load documents into the index stores."""
         import time
         start_time = time.time()
         self.logger.debug("Starting Document Loading ...")
 
-        def extract_stored_document_metadata(nodes) -> dict[str: dict]:
-            """Extract metadata from stored document nodes.
-            Args:
-                nodes: list of llama-index Document nodes
-            Returns:
-                dict[node_id: {metadata k:v}]
-            """
+        async def extract_stored_document_metadata(nodes) -> dict[str: dict]:
             stored_metadata = {}
-
             for node in nodes:
-                # Check if the node has _doc_id in metadata
                 if hasattr(node, "metadata") and f"{self.source.namespace}id" in node.metadata:
                     _doc_id = node.doc_id if hasattr(node, 'doc_id') else node.metadata[f"{self.source.namespace}id"]
                     node_id = node.node_id if hasattr(node, 'node_id') else _doc_id
                     n_metadata = {}
                     for k, v in node.metadata.items():
-                        # extract only metadata that starts with project_name
                         if k.startswith(f"{self.source.namespace}"):
                             n_metadata[k] = v
                     stored_metadata[node_id] = n_metadata
-
             return stored_metadata
-        
 
         all_nodes = list(self.storage_context.docstore.docs.values())
         self.logger.debug("Found %s nodes in storage", len(all_nodes))
-        stored_metadata = extract_stored_document_metadata(all_nodes)
-        self.logger.debug("Found %s documents with {namespace} metadata", len(stored_metadata))
+        #stored_metadata = await extract_stored_document_metadata(all_nodes)
+        stored_metadata = await timed_async_execution(extract_stored_document_metadata, all_nodes)
+        self.logger.debug("Found %s documents with %s metadata", len(stored_metadata), self.namespace)
 
-        # get metadata from the source
         if document_list:
-            source_docs_metadata: dict = {d.metadata[f"{self.namespace}id"]: d.metadata 
-                                          for d in document_list if hasattr(d, "metadata")}
+            source_docs_metadata = {d.metadata[f"{self.namespace}id"]: d.metadata 
+                                   for d in document_list if hasattr(d, "metadata")}
         else:
-            source_docs_metadata: dict = self.source.get_all_metadata()
+            source_docs_metadata = await self.source.get_all_metadata()
         
         docs_to_remove = set()
         docs_to_add = set()
@@ -459,100 +612,67 @@ class IndexStore():
                 self.logger.debug("force=True specified, removing File %s ...", stored__doc_id)
                 docs_to_remove.add(stored__doc_id)
             elif stored__doc_id not in source_docs_metadata:
-                self.logger.debug("removing File %s ...", stored__doc_id)
+                self.logger.debug("%s not found in source, removing ...", stored__doc_id)
                 docs_to_remove.add(stored__doc_id)
 
-        # delete from vector store
-        doc_remove_count = 0
-        node_remove_count = 0
-        try:
-            if hasattr(self.storage_context.vector_store, "delete"):
-                self.storage_context.vector_store.delete(ref_doc_id=doc_to_remove)
-                doc_remove_count += 1
-            else:
-                raise (TypeError("This VectorStore does not support .delete method"))
-        except Exception as e:
-            if hasattr(self.storage_context.vector_store, "delete_notes"):
-                nodes_to_remove = set()
-                for node in all_nodes:
-                    node_id = node.node_id
-                    if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove):
-                         nodes_to_remove.add(node_id)
-                         node_remove_count += 1
-                self.storage_context.vector_store.delete_nodes(node_ids=nodes_to_remove)
-        self.logger.debug("Removed %s document and %s nodes that were not linked to doc_ids from docstore"
-                          , doc_remove_count, node_remove_count)
+        # Delete from indexes 
+        await self.delete_docs( docs_to_remove)
 
 
-        doc_remove_count = 0
-        node_remove_count = 0
-        try: 
-            for doc_to_remove in docs_to_remove:
-                self.storage_context.docstore.delete_ref_doc(ref_doc_id=doc_to_remove)
-                doc_remove_count += 1
-        except: 
-            self.logger.warning("Error removing %s, trying removing nodes with metadata matching this doc", doc_to_remove)
-            for node in all_nodes:
-                node_id = node.node_id
-                if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove):
-                    node_remove_count += 1
-                    #del self.storage_context.docstore.docs[node_id]
-                    self.storage_context.docstore.delete_document(doc_id=node_id)
-        self.logger.debug("Removed %s document and %s nodes that were not linked to doc_ids from docstore"
-                          , doc_remove_count, node_remove_count)
-        
 
+        # Remove from cache
         cache_remove_count = 0
         redis_json_prefix = self.namespace + "RJ:"
         for dtr in docs_to_remove:
-            rc=self.redis_client.execute_command("DEL", 'key', redis_json_prefix + dtr)
+            rc = await self.async_redis_client.execute_command("DEL", redis_json_prefix + dtr)
+            self.logger.debug("%s cached document matching %s were removed...",rc, dtr)
             cache_remove_count += rc
         self.logger.debug("Removed %s documents from cache", cache_remove_count)
 
-
+        # Add new documents
         new_documents = []
         if docs_to_add:
             if document_list:
                 new_documents = [d for d in document_list if d.metadata[f"{self.source.namespace}id"] in docs_to_add]
             else:
-                #if incoming document_list is empty, then pull doc from source
-                new_documents = self.source.get_documents(doc_id_list=docs_to_add)
+                new_documents = await self.source.get_documents(doc_id_list=docs_to_add)
             
-            self.logger.debug("Updated docstore with %s new/modified documents", len(docs_to_add))
+            self.logger.debug("Determined %s new/modified documents to load", len(docs_to_add))
 
-        # cache the original document in Redis (if it's valid JSON)
+        # Cache the original documents
         try:
             redis_json_prefix = self.namespace + "RJ:"
             for new_doc in new_documents:
-                orig_doc: dict = dict(new_doc.text_resource or new_doc.text)
+                orig_doc = dict(new_doc.text_resource or new_doc.text)
                 orig_doc["metadata"] = new_doc.metadata
-                orig_doc_id =  redis_json_prefix + new_doc.metadata[f"{self.namespace}id"]
-                self.redis_client.execute_command("JSON.SET", orig_doc_id, '$', json.dumps(orig_doc)) 
+                orig_doc_id = redis_json_prefix + new_doc.metadata[f"{self.namespace}id"]
+                await self.async_redis_client.execute_command(
+                    "JSON.SET",
+                    orig_doc_id,
+                    ".",
+                    json.dumps(orig_doc)
+                )
         except Exception as e: 
             self.logger.warning("Unable to process orig doc as JSON, will skip caching in Redis...", exc_info=e)
 
-        # Insert new documents to vector_index_store
-        new_nodes = self.docs_to_nodes(new_documents)
+        # Insert new documents to indexes
+        new_nodes = timed_execution(self.docs_to_nodes, new_documents)
+        await timed_async_execution(self.indexes["vector_index"]._async_add_nodes_to_index, index_struct=self.indexes["vector_index"].index_struct, nodes=new_nodes)
+        timed_execution(self.indexes["summary_index"].insert_nodes, new_nodes)
+        await timed_async_execution(self.indexes["keyword_index"]._async_add_nodes_to_index, index_struct=self.indexes["keyword_index"].index_struct, nodes=new_nodes)
 
-        self.indexes["vector_index"].insert_nodes(new_nodes)
-        self.indexes["summary_index"].insert_nodes(new_nodes)
-        self.indexes["keyword_index"].insert_nodes(new_nodes)
-
-        # Calculate and log elapsed time
         end_time = time.time()
         elapsed_time = end_time - start_time
         self.logger.info("Document loading completed in %.2f seconds", elapsed_time)
 
-        return None
-
-    def get_cached_doc_metadata(self) -> dict:
+    async def get_cached_doc_metadata(self) -> dict:
         """Retrieve cached document metadata from Redis."""
         redis_json_prefix = self.namespace + "RJ:"
         metadata = {}
         try:
-            redisjson_keys = self.redis_client.execute_command("KEYS", f"{redis_json_prefix}*")
+            redisjson_keys = await self.async_redis_client.execute_command("KEYS", f"{redis_json_prefix}*")
             for k in redisjson_keys:
-                b_value = self.redis_client.execute_command("JSON.GET", k)
+                b_value = await self.async_redis_client.execute_command("JSON.GET", k)
                 cached_doc = json.loads(b_value)
                 if isinstance(k, bytes):
                     k = k.decode('utf-8')
@@ -561,112 +681,33 @@ class IndexStore():
             self.logger.warning("Error retrieving cached doc metadata", exc_info=e)
         return metadata
 
-
-    def get_cached_documents(self, doc_id_list: list = []) -> list[dict]:
+    async def get_cached_documents(self, doc_id_list: list = []) -> list[dict]:
+        """Get cached documents from Redis."""
         redis_json_prefix = self.namespace + "RJ:"
         docs = []
         for doc_id in doc_id_list:
-            b_doc = self.redis_client.execute_command("JSON.GET", redis_json_prefix + doc_id, '$')
+            b_doc = await self.async_redis_client.execute_command("JSON.GET", redis_json_prefix + doc_id, ".")
             if b_doc:
-                docs.extend(json.loads(b_doc))
-
+                docs.append(json.loads(b_doc))
         return docs
 
-    def __init__(self, source: Source, index_schema: dict | None = None,
-                 namespace: str = "", reset: bool = False) -> None:
-        self.logger = get_default_logger(self.__class__.__name__)
-        self.namespace = namespace or config.PROJECT_NAME
-        self.index_schema = index_schema
-        if (not hasattr(self, "name")):
-            # incase inherited instance did not define name
-            if "index" in index_schema:
-                # if index_schema has ["index"]["name"], use it as self.name, or use self.namespace as self.name
-                self.name = index_schema["index"].get("name", self.namespace).removesuffix(".vector")
-            else:
-                # otherwise use "default"
-                self.name = f"{self.namespace}{self.__class__.__name__}"
-
-        self.source = source
-
-        self.indexes = {str: SummaryIndex | KeywordTableIndex | VectorStoreIndex}
-
-        # Redis client is needed to perform other activities like cleaning up
-        self.logger.debug("creating Redis client... %s:%s", config.REDIS_HOST, config.REDIS_PORT)
-        self.redis_client = Redis(
-            host=config.REDIS_HOST,
-            port=config.REDIS_PORT,
-            password=config.REDIS_PASSWORD,
-            username=config.REDIS_USERNAME,
-            db=0
-        )
-        self.logger.debug("Redis client created: %s", self.redis_client.ping())
-
-        try:
-            # try to reconnect to storage_context and retrieve docstore/index/vectorindex
-            if f"{self.namespace}vector".encode('utf-8') not in self.redis_client.execute_command("FT._LIST"):
-                raise IndexError("Vector Index not found in Redis")
-
-            redis_keys = self.redis_client.execute_command("keys", f"{self.name}*")
-            for store_type in ["doc", "index"]:
-                if f"{self.namespace}{store_type}".encode('utf-8') not in redis_keys:
-                    raise IndexError(f"{store_type} store is not found in Redis")
-
-            # if all 3 stores are found to be in Redis already:
-            self.storage_context = self.connect_to_redis_stores()
-
-            self.indexes["vector_index"] = VectorStoreIndex.from_vector_store(
-                vector_store=self.storage_context.vector_store
-            )
-            self.indexes["summary_index"] = load_index_from_storage(
-                self.storage_context, index_id=f"{self.name}_summary")
-            self.indexes["keyword_index"] = load_index_from_storage(
-                self.storage_context, index_id=f"{self.name}_keyword")
-
-            # Create retrievers from each index
-            summary_retriever = self.indexes["summary_index"].as_retriever()
-            vector_retriever = self.indexes["vector_index"].as_retriever()
-            keyword_retriever = self.indexes["keyword_index"].as_retriever()
-
-            # Combine retrievers using fusion
-            fusion_retriever = QueryFusionRetriever(
-                retrievers=[summary_retriever, vector_retriever, keyword_retriever],
-                similarity_top_k=3,  # Number of results from each retriever
-                num_queries=1,       # Number of query variations to generate
-                mode="simple"        # Can be "simple" or "reciprocal_rank_fusion"
-            )
-
-            # Create a query engine from the fusion retriever
-            self.query_engine = RetrieverQueryEngine.from_args(
-                retriever=fusion_retriever
-            )
-
-        except Exception:
-            # if storage_context can't be loaded from storage, call create_index() to build it.
-            self.query_engine = self.create_index(force=(reset is True))
-
-        self.logger.debug(f"initialized Issue Index Vector Store...")
-
-        self.load_documents(source.get_all_documents(), force=reset)
-        self.logger.debug("Loaded / refreshed documents for all indexes")
-
-        # self.persist_dir = persist_dir or os.path.join(config.INDEX_STORE_PERSIST_DIR, self.name)
-        #self.storage_context.persist()
-
-    def query(self, question: str) -> str:
-        """query the index about the content indexed"""
-
-        response = self.query_engine.query(question)
-
+    async def query(self, question: str):
+        """Query the index about the content indexed"""
+        response = await self.query_engine.aquery(question)
         self.logger.debug("answered query '%s' with '%s'", question, response)
         return response
 
-    def refresh(self) -> str:
-        # Load the updated documents
+    async def refresh(self):
+        """Refresh the index with latest documents"""
+        await self.load_documents(force=True)
+        return "Index refreshed"
 
-        # Query using the fusion engine
-        response = self.query_engine.query("Tell me about renewable energy")
+    async def __aenter__(self):
+        await self.initialize()
+        return self
 
-
-if __name__ == "__main__":
-    import doctest
-    doctest.testmod()
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if hasattr(self, 'async_redis_client'):
+            await self.async_redis_client.close()
+        if hasattr(self, 'redis_client'):
+            self.redis_client.close()

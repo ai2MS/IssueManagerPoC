@@ -264,6 +264,51 @@ body, html {
     background-color: #0b7dda;
 }
 
+/* Typing Indicator */
+.typing-indicator {
+    background-color: #f1f1f1;
+    border-radius: 18px;
+    border-bottom-left-radius: 5px;
+    padding: 15px 20px;
+    display: none;
+    margin-bottom: 15px;
+    max-width: 80%;
+    margin-right: auto;
+    position: relative;
+}
+
+.typing-indicator span {
+    height: 8px;
+    width: 8px;
+    background-color: #8b8b8b;
+    display: inline-block;
+    border-radius: 50%;
+    margin-right: 5px;
+    animation: typing-dot 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.typing-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
+    margin-right: 0;
+}
+
+@keyframes typing-dot {
+    0%, 60%, 100% { 
+        transform: translateY(0);
+    }
+    30% { 
+        transform: translateY(-5px);
+    }
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .container {

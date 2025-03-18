@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', function() {
             e.preventDefault();
             
             const message = chatInput.value.trim();
+            const evaluation = document.getElementById('evaluation-criteria').value.trim();
             if (message) {
                 // Add user message to chat
                 addMessage(message, 'user');
@@ -33,11 +34,43 @@ document.addEventListener('DOMContentLoaded', function() {
                 const issueId = issueSelector.value;
                 
                 // Send message to backend
-                sendMessage(message, issueId);
+                sendMessage(message, evaluation, issueId);
             }
         });
     }
-    
+    // Function to show the typing indicator
+    function showTypingIndicator() {
+        // Remove any existing indicator first (just to be safe)
+        hideTypingIndicator();
+        
+        // Create the typing indicator element
+        const typingIndicator = document.createElement('div');
+        typingIndicator.className = 'typing-indicator';
+        typingIndicator.id = 'typing-indicator';
+        typingIndicator.style.display = 'block';
+  
+        // Add the dots
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement('span');
+            typingIndicator.appendChild(dot);
+        }
+        
+        // Append to chat-messages
+        const chatMessages = document.querySelector('.chat-messages');
+        chatMessages.appendChild(typingIndicator);
+        
+        // Scroll to the bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Function to hide the typing indicator
+    function hideTypingIndicator() {
+        const existingIndicator = document.getElementById('typing-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+    }
+
     // Function to load issue details
     function loadIssue(issueId) {
         fetch(`/api/issues/${issueId}`)
@@ -178,7 +211,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Function to send message to backend
-    function sendMessage(message, issueId) {
+    function sendMessage(message, evaluation, issueId) {
+        showTypingIndicator();
         fetch('/api/chat', {
             method: 'POST',
             headers: {
@@ -186,16 +220,19 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify({
                 message: message,
+                evaluation: evaluation,
                 issue_id: issueId
             }),
         })
         .then(response => response.json())
         .then(data => {
+            hideTypingIndicator();
             // Add AI response to chat
             addMessage(data.response, 'ai');
         })
         .catch(error => {
             console.error('Error sending message:', error);
+            hideTypingIndicator();
             addMessage('Sorry, there was an error processing your request.', 'ai');
         });
     }
