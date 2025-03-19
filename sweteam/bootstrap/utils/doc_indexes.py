@@ -38,6 +38,7 @@ from ..config import config
 from .log import get_logger, get_default_logger
 from . import timed_async_execution, timed_execution
 from .file_utils import dir_contains
+from .redis_pool import RedisConnectionPool
 
 # bge-m3 embedding model uses 1024 dimmesions
 embedding_dim = 1024
@@ -209,6 +210,7 @@ class IndexStore():
     """
 
     def __init__(self, source: Source, index_schema: dict | None = None,
+                 redis_connection_pool: RedisConnectionPool|None = None, 
                  namespace: str = "", reset: bool = False) -> None:
         self.logger = get_default_logger(self.__class__.__name__)
         self.namespace = namespace or config.PROJECT_NAME
@@ -225,24 +227,43 @@ class IndexStore():
         
         # Create Redis clients
         self.logger.debug("creating Redis clients... %s:%s", config.REDIS_HOST, config.REDIS_PORT)
-        self.redis_connection_pool = ConnectionPool(host=config.REDIS_HOST,
+        
+        if redis_connection_pool is None: 
+            self.redis_connection_pool = ConnectionPool(host=config.REDIS_HOST,
                                                     port=config.REDIS_PORT,
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
-        self.redis_client = Redis(connection_pool=self.redis_connection_pool)
-        self.async_redis_connection_pool = AsyncConnectionPool(host=config.REDIS_HOST,
-                                                               port=config.REDIS_PORT,
-                                                               password=config.REDIS_PASSWORD,
-                                                               username=config.REDIS_USERNAME,
-                                                               db=0)
-        self.async_redis_client = AsyncRedis(connection_pool=self.async_redis_connection_pool)
-        self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
-            async_redis_client=self.async_redis_client)
-
+            self.redis_client = Redis(connection_pool=self.redis_connection_pool)
+            self.async_redis_connection_pool = AsyncConnectionPool(host=config.REDIS_HOST,
+                                                                port=config.REDIS_PORT,
+                                                                password=config.REDIS_PASSWORD,
+                                                                username=config.REDIS_USERNAME,
+                                                                db=0)
+            self.async_redis_client = AsyncRedis(connection_pool=self.async_redis_connection_pool)
+        else:
+            # Use the provided RedisConnectionPool
+            self.redis_client = redis_connection_pool.get_client(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
+            self.async_redis_client = redis_connection_pool.get_async_client(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
+            ## Note, currently self.async_redis_client is a coroutine because redis_connection_pool.get_async_client() 
+            ## is async.  In initialize(), we will await itself so that it becomes a Redis client
 
     async def initialize(self) -> None:
         """Initialize the IndexStore asynchronously"""
+        # first await async_redis_client to make it from a coroutine to a Redis async client
+        self.async_redis_client = await self.async_redis_client
+        # then create RedisKVStore to be used by indexes
+        self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
+            async_redis_client=self.async_redis_client)
+
         self.logger.debug("Redis clients created: %s", await self.async_redis_client.ping())
 
         try:
@@ -431,37 +452,6 @@ class IndexStore():
         return fusion_query_engine
 
     async def delete_docs(self, doc_id_set:set = set()):
-        # doc_remove_count = 0
-        # node_remove_count = 0
-        # need_to_delete_by_nodes = True
-        # if hasattr(self.storage_context.vector_store, "adelete"):
-        #     need_to_delete_by_nodes = False
-        #     for doc_to_remove in doc_id_list:
-        #         self.logger.debug("Removing %s from vector_store", doc_to_remove)
-        #         try:
-        #             await self.storage_context.vector_store.adelete(ref_doc_id=doc_to_remove)
-        #             doc_remove_count += 1
-        #         except Exception as e:
-        #             self.logger.warning("Removing %s from VectorStore run into error, will try to delete nodes "
-        #                                 "with metadata pointing to it...", doc_to_remove, exc_info=e)
-        #             need_to_delete_by_nodes = True
-        # if need_to_delete_by_nodes:  
-        #     if hasattr(self.storage_context.vector_store, "delete_notes"):
-        #         nodes_to_remove = set()
-        #         for node in all_nodes:
-        #             node_id = node.node_id
-        #             if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove):
-        #                  nodes_to_remove.add(node_id)
-        #                  node_remove_count += 1
-        #         await self.storage_context.vector_store.delete_nodes(node_ids=nodes_to_remove)
-        #     else:
-        #         raise TypeError(f"VectorStore {self.storage_context.vector_store} does not support delete_notes")
-
-        # self.logger.debug("Removed %s document and %s nodes from vector store", 
-        #                  doc_remove_count, node_remove_count)
-
-        # record doc_id_list to remove in Redis so even if program restarts midway, we know there are docs to remove
-
         deleting_list_key = f'{self.namespace}{self.name}_deleting_docs'
 
         unfinished_deletes_b = self.redis_client.get(deleting_list_key)
@@ -558,9 +548,6 @@ class IndexStore():
 
     async def load_documents(self, document_list: list[Document] = [], force: bool = False):
         """Load documents into the index stores."""
-        import time
-        start_time = time.time()
-        self.logger.debug("Starting Document Loading ...")
 
         async def extract_stored_document_metadata(nodes) -> dict[str: dict]:
             stored_metadata = {}
@@ -655,10 +642,6 @@ class IndexStore():
         await timed_async_execution(self.indexes["vector_index"]._async_add_nodes_to_index, index_struct=self.indexes["vector_index"].index_struct, nodes=new_nodes)
         timed_execution(self.indexes["summary_index"].insert_nodes, new_nodes)
         await timed_async_execution(self.indexes["keyword_index"]._async_add_nodes_to_index, index_struct=self.indexes["keyword_index"].index_struct, nodes=new_nodes)
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        self.logger.info("Document loading completed in %.2f seconds", elapsed_time)
 
     async def get_cached_doc_metadata(self) -> dict:
         """Retrieve cached document metadata from Redis."""

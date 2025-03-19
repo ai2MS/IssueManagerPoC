@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from redis import Redis
 import uvicorn
 import sys
 import os
@@ -17,6 +18,7 @@ nest_asyncio.apply()
 from .utils import timed_async_execution
 from .utils.log import get_default_logger
 from .utils.issue_management import IssueManager
+from .utils.redis_pool import RedisConnectionPool
 from .config import config
 
 class ChatMessage(BaseModel):
@@ -29,13 +31,19 @@ class UserInput(BaseModel):
 
 
 class IssueManagementApp:
-    def __init__(self):
+    def __init__(self, redis_pool: Optional[RedisConnectionPool] = None):
         self.logger = get_default_logger(self.__class__.__name__)
+        self.redis_pool = redis_pool or RedisConnectionPool()
         self.app = FastAPI()
         self._setup_routes()
         self._setup_static_files()
         self._setup_templates()
         self.issue_manager = None
+        self.redis_client = self.redis_pool.get_client(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
 
         # Add startup and shutdown events
         self.app.add_event_handler("startup", self.startup_event)
@@ -60,8 +68,13 @@ class IssueManagementApp:
     async def startup_event(self):
         """Initialize the IssueManager on startup"""
         self.logger.debug("Setting up issue_manager for the FastAPI app...")
-        manager = IssueManager()
-        self.issue_manager = await timed_async_execution(manager.__aenter__)
+        self.async_redis_client = await self.redis_pool.get_async_client(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
+        issue_manager = IssueManager(redis_connection_pool=self.redis_pool)
+        self.issue_manager = await timed_async_execution(issue_manager.__aenter__)
         self.logger.debug("Finished Setting up issue_manager for the FastAPI app.")
         return self.issue_manager
 
@@ -186,8 +199,9 @@ class IssueManagementApp:
 
 
 def main():
-    app = IssueManagementApp()
-    app.run()
+    with RedisConnectionPool() as redis_pool:
+        app = IssueManagementApp(redis_pool=redis_pool)
+        app.run()
 
 
 if __name__ == "__main__":

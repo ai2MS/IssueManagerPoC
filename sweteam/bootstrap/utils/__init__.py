@@ -39,23 +39,26 @@ def get_dot_notation_value(dict_obj, dot_path, default=None):
 
 def timed_execution(f: Callable, *args, **kwargs) -> Any:
     import time
-    logger.info("Start timed execution of %s...", f.__name__)
+    method_name=f.__self__.__class__.__name__ + "." + f.__name__ if hasattr(f, '__self__') else f.__name__
+    logger.info("Start timed execution of %s...", method_name)
     start_time = time.time()
     return_value = f(*args, **kwargs)
     end_time = time.time()
     elapsed_time = end_time - start_time
-    logger.info("Timed Execution of %s completed in %.2f seconds", f.__name__, elapsed_time)
+    logger.info("Timed Execution of %s completed in %.2f seconds", method_name, elapsed_time)
     return return_value
 
 async def timed_async_execution(f: Callable, *args, **kwargs) -> Any:
     import time
-    logger.info("Start timed Async execution of %s...", f.__name__)
+    method_name=f.__self__.__class__.__name__ + "." + f.__name__ if hasattr(f, '__self__') else f.__name__
+    logger.info("Start timed Async execution of %s...", method_name)
     start_time = time.time()
     return_value = await f(*args, **kwargs)
     end_time = time.time()
     elapsed_time = end_time - start_time
-    logger.info("Timed Async Execution of %s completed in %.2f seconds", f.__name__, elapsed_time)
+    logger.info("Timed Async Execution of %s completed in %.2f seconds", method_name, elapsed_time)
     return return_value
+
 
 class Action(Enum):
     """Action Enum for the agent to take."""

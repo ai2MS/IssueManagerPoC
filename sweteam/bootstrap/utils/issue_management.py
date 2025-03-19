@@ -256,7 +256,7 @@ class IssueManager(IndexStore):
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         self.name: str = "issue_indexes"
         namespace = "IssManJira/"
 
@@ -289,7 +289,7 @@ class IssueManager(IndexStore):
             }
         )
         jira_issues = JIRA(namespace=namespace)
-        super().__init__(jira_issues, issue_index_schema, namespace=namespace)
+        super().__init__(jira_issues, issue_index_schema, namespace=namespace, *args, **kwargs)
 
     async def create(self):
         pass
