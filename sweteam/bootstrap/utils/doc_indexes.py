@@ -30,9 +30,9 @@ from llama_index.vector_stores.redis import RedisVectorStore
 from llama_index.storage.index_store.redis import RedisIndexStore
 from llama_index.storage.docstore.redis import RedisDocumentStore
 
-from redis import Redis
+from redis import Redis, ConnectionPool
 nest_asyncio.apply()
-from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio import Redis as AsyncRedis, ConnectionPool as AsyncConnectionPool
 
 from ..config import config
 from .log import get_logger, get_default_logger
@@ -225,20 +225,18 @@ class IndexStore():
         
         # Create Redis clients
         self.logger.debug("creating Redis clients... %s:%s", config.REDIS_HOST, config.REDIS_PORT)
-        self.redis_client = Redis(
-            host=config.REDIS_HOST,
-            port=config.REDIS_PORT,
-            password=config.REDIS_PASSWORD,
-            username=config.REDIS_USERNAME,
-            db=0
-        )
-        self.async_redis_client = AsyncRedis(
-            host=config.REDIS_HOST,
-            port=config.REDIS_PORT,
-            password=config.REDIS_PASSWORD,
-            username=config.REDIS_USERNAME,
-            db=0
-        )
+        self.redis_connection_pool = ConnectionPool(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
+        self.redis_client = Redis(connection_pool=self.redis_connection_pool)
+        self.async_redis_connection_pool = AsyncConnectionPool(host=config.REDIS_HOST,
+                                                               port=config.REDIS_PORT,
+                                                               password=config.REDIS_PASSWORD,
+                                                               username=config.REDIS_USERNAME,
+                                                               db=0)
+        self.async_redis_client = AsyncRedis(connection_pool=self.async_redis_connection_pool)
         self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
             async_redis_client=self.async_redis_client)
 
@@ -516,7 +514,7 @@ class IndexStore():
                     if hasattr(index, dm):
                         func = getattr(index, dm)
                         break
-                await func(doc_nodes_to_remove)
+                await timed_async_execution(func, doc_nodes_to_remove)
             except Exception as e:
                 self.logger.warning("Asyn deleting nodes methods are unavailable, try sync deletion")
                 delete_methods = ['delete_ref_doc', 'delete_notes', 'delete']
@@ -524,7 +522,7 @@ class IndexStore():
                     if hasattr(index, dm):
                         func = getattr(index, dm)
                         break
-                func(node_ids=doc_nodes_to_remove)
+                timed_execution(func, node_ids=doc_nodes_to_remove)
 
             nodes_removed += len(doc_nodes_to_remove)
             self.logger.debug("Removed %s docs and %s nodes from %s.", docs_removed, nodes_removed, index.index_id)
@@ -544,8 +542,8 @@ class IndexStore():
                 need_to_delete_by_nodes = True
 
         if need_to_delete_by_nodes: 
-            for node in all_nodes:
-                node_id = node.node_id
+            for node_id, node in self.storage_context.docstore.docs.items():
+                #node_id = node.node_id
                 if (hasattr(node, "metadata") and node.metadata.get(f"{self.source.namespace}id") in docs_to_remove
                     or node.ref_doc_id in docs_to_remove):
                     node_remove_count += 1
@@ -579,7 +577,6 @@ class IndexStore():
 
         all_nodes = list(self.storage_context.docstore.docs.values())
         self.logger.debug("Found %s nodes in storage", len(all_nodes))
-        #stored_metadata = await extract_stored_document_metadata(all_nodes)
         stored_metadata = await timed_async_execution(extract_stored_document_metadata, all_nodes)
         self.logger.debug("Found %s documents with %s metadata", len(stored_metadata), self.namespace)
 
@@ -616,9 +613,7 @@ class IndexStore():
                 docs_to_remove.add(stored__doc_id)
 
         # Delete from indexes 
-        await self.delete_docs( docs_to_remove)
-
-
+        await self.delete_docs(docs_to_remove)
 
         # Remove from cache
         cache_remove_count = 0
@@ -707,7 +702,14 @@ class IndexStore():
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self, 'async_redis_client'):
-            await self.async_redis_client.close()
-        if hasattr(self, 'redis_client'):
-            self.redis_client.close()
+        try:
+            if getattr(self, 'async_redis_client', None):
+                await self.async_redis_client.close()
+            if getattr(self, 'redis_client', None):
+                self.redis_client.close()
+            if getattr(self, 'redis_connection_pool', None):
+                self.redis_connection_pool.disconnect()
+            if getattr(self, 'async_redis_connection_pool', None):
+                await self.async_redis_connection_pool.disconnect()
+        except Exception as e:
+            self.logger.warning("Error closing Redis connections: %s", e)

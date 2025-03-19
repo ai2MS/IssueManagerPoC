@@ -214,10 +214,33 @@ function addCollapsibleListeners() {
             const content = this.nextElementSibling;
             if (content && content.classList.contains('json-content')) {
                 content.classList.toggle('hidden');
+                // If shift is held, update all child collapsible nodes
+                if (e.shiftKey) {
+                    // Determine the new state; if current is collapsed then we want to collapse children, otherwise expand them.
+                    const shouldCollapse = this.classList.contains('collapsed');
+                    setCollapseState(content, shouldCollapse);
+                }
             }
         });
     });
 }
+// Function to recursively set collapse state for all collapsible subnodes under a container
+function setCollapseState(container, collapse) {
+    container.querySelectorAll('.collapsible').forEach(el => {
+        if (collapse) {
+            el.classList.add('collapsed');
+            if (el.nextElementSibling && el.nextElementSibling.classList.contains('json-content')) {
+                el.nextElementSibling.classList.add('hidden');
+            }
+        } else {
+            el.classList.remove('collapsed');
+            if (el.nextElementSibling && el.nextElementSibling.classList.contains('json-content')) {
+                el.nextElementSibling.classList.remove('hidden');
+            }
+        }
+    });
+}
+
 
 // Function to parse and format JSON string
 function parseAndFormatJSON(jsonString, container) {
