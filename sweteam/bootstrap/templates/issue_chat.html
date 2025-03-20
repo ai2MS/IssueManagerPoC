@@ -67,6 +67,7 @@
         };
 
         eventSource.onerror = function(error) {
+            console.log('EventSource failed:', error);
             updateStatus('error', 'Connection lost. Retrying...');
         };
     </script>

@@ -152,7 +152,8 @@ class IssueManagementApp:
     async def status_endpoint(self, request: Request):
         if self.initialized.is_set():
             async def ready_generator():
-                yield {"event": "message", "data": json.dumps({"status": "ready", "message": "OK"})}
+                while True:
+                    yield {"event": "message", "data": '{"status": "ready", "message": "Already initialized"}'}
             return EventSourceResponse(ready_generator())
             
         async def event_generator():
