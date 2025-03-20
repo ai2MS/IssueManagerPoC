@@ -5,8 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Issue Management Assistant</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .status {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 5px;
+        }
+        .initializing { background-color: #fff3cd; }
+        .ready { background-color: #d4edda; }
+        .error { background-color: #f8d7da; }
+    </style>
 </head>
 <body>
+    <!--status bar-->
+    <div id="statusDisplay" class="status initializing">
+        Updating...
+    </div>
+    <script>
+        const statusDisplay = document.getElementById('statusDisplay');
+
+        function updateStatus(status, message = '') {
+            statusDisplay.className = `status ${status}`;
+            statusDisplay.textContent = message || status.charAt(0).toUpperCase() + status.slice(1);
+        }
+
+        // Connect to SSE endpoint
+        const eventSource = new EventSource('/api/status');
+
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            updateStatus(data.status, data.message);
+        };
+
+        eventSource.onerror = function(error) {
+            updateStatus('error', 'Connection lost. Retrying...');
+        };
+    </script>
+
+    <!--normal contents-->
     <div class="container">
         <!-- Left panel - Issue display -->
         <div class="issue-panel">

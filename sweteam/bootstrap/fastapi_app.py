@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -14,6 +14,8 @@ import nest_asyncio  # Add this import
 
 # Apply nest_asyncio right after imports
 nest_asyncio.apply()
+import asyncio
+from sse_starlette.sse import EventSourceResponse
 
 from .utils import timed_async_execution
 from .utils.log import get_default_logger
@@ -44,10 +46,14 @@ class IssueManagementApp:
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
+        self.async_redis_client = None
 
         # Add startup and shutdown events
         self.app.add_event_handler("startup", self.startup_event)
         self.app.add_event_handler("shutdown", self.shutdown_event)
+
+        self.initialization_task: Optional[asyncio.Task] = None
+        self.initialized = asyncio.Event()
 
     def _setup_static_files(self):
         """Set up static files directory"""
@@ -73,14 +79,21 @@ class IssueManagementApp:
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
-        issue_manager = IssueManager(redis_connection_pool=self.redis_pool)
-        self.issue_manager = await timed_async_execution(issue_manager.__aenter__)
-        self.logger.debug("Finished Setting up issue_manager for the FastAPI app.")
+        self.issue_manager = IssueManager(redis_connection_pool=self.redis_pool)
+        self.initialization_task = asyncio.create_task(self.issue_manager.initialize())
+        self.logger.debug("Finished Setting up issue_manager for the FastAPI app, handling initialization to separate task...")
         return self.issue_manager
 
     async def shutdown_event(self):
         """Cleanup the IssueManager on shutdown"""
         self.logger.debug("Shutting down FastAPI app, including the issue_manager...")
+        if self.initialization_task:
+            self.initialization_task.cancel()
+            try:
+                await self.initialization_task
+            except asyncio.CancelledError:
+                pass
+    
         if self.issue_manager:
             await self.issue_manager.__aexit__(None, None, None)
 
@@ -91,7 +104,26 @@ class IssueManagementApp:
         self.app.get("/api/issues/{issue_id}")(self.get_issue)
         self.app.post("/api/chat")(self.chat)
         self.app.get("/api/issues")(self.list_issues)
+        self.app.get("/api/status")(self.status_endpoint)
 
+    async def status_endpoint(self, request: Request):
+        async def event_generator():
+            if self.async_redis_client is None:
+                pubsub = self.redis_client.pubsub()
+                pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+            else:
+                pubsub = self.async_redis_client.pubsub()
+                await pubsub.subscribe("status_channel")
+            try:
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        yield {"event": "message", "data": message["data"].decode()}
+            except asyncio.CancelledError:
+                await pubsub.unsubscribe("status_channel")
+                raise
+
+        return EventSourceResponse(event_generator())
+    
     async def get_issue_list(self) -> list:
         """Get list of all issues with basic information"""
         issues = await self.issue_manager.get_cached_doc_metadata() or await self.issue_manager.source.get_all_metadata()
@@ -159,7 +191,7 @@ class IssueManagementApp:
                 return issue
         except Exception as e:
             self.logger.warning("Error retrieving document %s from the source, due to %s", issue_id, e, exc_info=e)
-            return {"error": "Issue not found"}, 404
+            return {"message": "Issue not found", "error": 404}
 
     def _parse_json_string(self, data: Any) -> Any:
         """Helper method to parse JSON strings"""

@@ -173,12 +173,11 @@ class Files(Source):
 
         return documents
 
-    async def get_metadata(self, os_stat:object, metadata:dict = {}) -> dict:
+    async def get_metadata(self, os_stat, metadata:dict = {}) -> dict:
         """Return metadata that are compatible with {doc_id: {doc_size:int, updated_at:datetime}}"""
         metadata.setdefault(f"{self.namespace}size", os_stat.st_size)
         metadata.setdefault(f"{self.namespace}created_at", os_stat.st_ctime)
         metadata.setdefault(f"{self.namespace}updated_at", os_stat.st_mtime)
-        metadata.setdefault(f"{self.namespace}hash", await self.get_file_hash(file_path))
         
         return metadata
 
@@ -227,39 +226,23 @@ class IndexStore():
         
         # Create Redis clients
         self.logger.debug("creating Redis clients... %s:%s", config.REDIS_HOST, config.REDIS_PORT)
-        
-        if redis_connection_pool is None: 
-            self.redis_connection_pool = ConnectionPool(host=config.REDIS_HOST,
+        self.redis_pool = redis_connection_pool or RedisConnectionPool()
+        self.redis_client = redis_connection_pool.get_client(host=config.REDIS_HOST,
                                                     port=config.REDIS_PORT,
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
-            self.redis_client = Redis(connection_pool=self.redis_connection_pool)
-            self.async_redis_connection_pool = AsyncConnectionPool(host=config.REDIS_HOST,
-                                                                port=config.REDIS_PORT,
-                                                                password=config.REDIS_PASSWORD,
-                                                                username=config.REDIS_USERNAME,
-                                                                db=0)
-            self.async_redis_client = AsyncRedis(connection_pool=self.async_redis_connection_pool)
-        else:
-            # Use the provided RedisConnectionPool
-            self.redis_client = redis_connection_pool.get_client(host=config.REDIS_HOST,
-                                                    port=config.REDIS_PORT,
-                                                    password=config.REDIS_PASSWORD,
-                                                    username=config.REDIS_USERNAME,
-                                                    db=0)
-            self.async_redis_client = redis_connection_pool.get_async_client(host=config.REDIS_HOST,
-                                                    port=config.REDIS_PORT,
-                                                    password=config.REDIS_PASSWORD,
-                                                    username=config.REDIS_USERNAME,
-                                                    db=0)
-            ## Note, currently self.async_redis_client is a coroutine because redis_connection_pool.get_async_client() 
-            ## is async.  In initialize(), we will await itself so that it becomes a Redis client
+        self.async_redis_client = None
+        ## self.async_redis_client can only be set in a async func, so in initialize() method
 
     async def initialize(self) -> None:
         """Initialize the IndexStore asynchronously"""
         # first await async_redis_client to make it from a coroutine to a Redis async client
-        self.async_redis_client = await self.async_redis_client
+        self.async_redis_client = await self.redis_pool.get_async_client(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
         # then create RedisKVStore to be used by indexes
         self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
             async_redis_client=self.async_redis_client)
@@ -495,8 +478,12 @@ class IndexStore():
                            else index.index_struct.nodes_dict.keys() if hasattr(index.index_struct, 'nodes_dict')
                            else index.docstore.docs)
             for node_id in index_nodes:
-                if (index.docstore.get_node(node_id).metadata[f"{self.namespace}id"] in need_to_remove_nodes_docs
-                    or index.docstore.get_node(node_id).ref_doc_id in need_to_remove_nodes_docs):
+                try:
+                    if (index.docstore.get_node(node_id).metadata[f"{self.namespace}id"] in need_to_remove_nodes_docs
+                        or index.docstore.get_node(node_id).ref_doc_id in need_to_remove_nodes_docs):
+                        doc_nodes_to_remove.append(node_id)
+                except Exception as e:
+                    self.logger.warning("Node %s does not have metadata, will try to delete it anyway...", node_id)
                     doc_nodes_to_remove.append(node_id)
             try:
                 delete_methods = ['adelete_ref_doc', 'adelete_notes', 'adelete']
@@ -600,7 +587,7 @@ class IndexStore():
                 docs_to_remove.add(stored__doc_id)
 
         # Delete from indexes 
-        await self.delete_docs(docs_to_remove)
+        await timed_async_execution(self.delete_docs, docs_to_remove)
 
         # Remove from cache
         cache_remove_count = 0
@@ -648,10 +635,16 @@ class IndexStore():
         redis_json_prefix = self.namespace + "RJ:"
         metadata = {}
         try:
-            redisjson_keys = await self.async_redis_client.execute_command("KEYS", f"{redis_json_prefix}*")
+            if self.async_redis_client:
+                redisjson_keys = await self.async_redis_client.execute_command("KEYS", f"{redis_json_prefix}*")
+            else:
+                redisjson_keys = self.redis_client.execute_command("KEYS", f"{redis_json_prefix}*")           
             for k in redisjson_keys:
-                b_value = await self.async_redis_client.execute_command("JSON.GET", k)
-                cached_doc = json.loads(b_value)
+                if self.async_redis_client:
+                    b_value = await self.async_redis_client.execute_command("JSON.GET", k)
+                else:
+                    b_value = self.redis_client.execute_command("JSON.GET", k)
+                cached_doc = json.loads(b_value or {})
                 if isinstance(k, bytes):
                     k = k.decode('utf-8')
                 metadata[k] = cached_doc["metadata"]
@@ -664,7 +657,10 @@ class IndexStore():
         redis_json_prefix = self.namespace + "RJ:"
         docs = []
         for doc_id in doc_id_list:
-            b_doc = await self.async_redis_client.execute_command("JSON.GET", redis_json_prefix + doc_id, ".")
+            if self.async_redis_client:
+                b_doc = await self.async_redis_client.execute_command("JSON.GET", redis_json_prefix + doc_id, ".")
+            else:
+                b_doc = self.redis_client.execute_command("JSON.GET", redis_json_prefix + doc_id, ".")
             if b_doc:
                 docs.append(json.loads(b_doc))
         return docs
@@ -682,6 +678,7 @@ class IndexStore():
 
     async def __aenter__(self):
         await self.initialize()
+        self.redis_client.publish(f"{self.namespace}{self.name}/status_channel", "{'status': 'ready', 'message': 'Issues refreshed.'}")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
