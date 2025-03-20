@@ -17,7 +17,7 @@ import os
 import json
 import hashlib
 from llama_index.core import (VectorStoreIndex, load_index_from_storage,
-                              SimpleKeywordTableIndex, KeywordTableIndex, SummaryIndex,
+                              SimpleKeywordTableIndex, RAKEKeywordTableIndex, SummaryIndex,
                               SimpleDirectoryReader, StorageContext, Settings, Document)
 from llama_index.core.node_parser import SentenceSplitter, JSONNodeParser
 from llama_index.core.query_engine import RetrieverQueryEngine
@@ -215,13 +215,10 @@ class IndexStore():
         self.namespace = namespace or config.PROJECT_NAME
         self.index_schema = index_schema
         if (not hasattr(self, "name")):
-            if "index" in index_schema:
-                self.name = index_schema["index"].get("name", self.namespace).removesuffix(".vector")
-            else:
-                self.name = f"{self.namespace}{self.__class__.__name__}"
+            self.name = {self.__class__.__name__}
 
         self.source = source
-        self.indexes: dict[str: SummaryIndex | KeywordTableIndex | VectorStoreIndex] = {}
+        self.indexes: dict[str: SummaryIndex | RAKEKeywordTableIndex | VectorStoreIndex] = {}
         self.reset = reset
         
         # Create Redis clients
@@ -232,20 +229,17 @@ class IndexStore():
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
-        self.async_redis_client = None
-        ## self.async_redis_client can only be set in a async func, so in initialize() method
-
-    async def initialize(self) -> None:
-        """Initialize the IndexStore asynchronously"""
-        # first await async_redis_client to make it from a coroutine to a Redis async client
-        self.async_redis_client = await self.redis_pool.get_async_client(host=config.REDIS_HOST,
+        self.async_redis_client = self.redis_pool.get_async_client(host=config.REDIS_HOST,
                                                     port=config.REDIS_PORT,
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
-        # then create RedisKVStore to be used by indexes
+        #  create RedisKVStore to be used by indexes
         self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
-            async_redis_client=self.async_redis_client)
+                                          async_redis_client=self.async_redis_client)
+
+    async def initialize(self) -> None:
+        """Initialize the IndexStore asynchronously"""
 
         self.logger.debug("Redis clients created: %s", await self.async_redis_client.ping())
 
@@ -298,6 +292,8 @@ class IndexStore():
         self.logger.debug(f"initialized Issue Index Vector Store...")
 
         await self.load_documents(await self.source.get_all_documents(), force=self.reset)
+        self.redis_client.publish(f"{self.namespace}{self.name}/status_channel", "{'status': 'ready', 'message': 'Issues refreshed.'}")
+
         self.logger.debug("Loaded / refreshed documents for all indexes")
 
     def docs_to_nodes(self, documents) -> list[Document]:
@@ -407,7 +403,7 @@ class IndexStore():
         except Exception as e:
             self.logger.warning(
                 "Unable to load and refresh keywordindex from storage, will re-create. Error detail: %s", e)
-            keyword_index = SimpleKeywordTableIndex(
+            keyword_index = RAKEKeywordTableIndex(
                 nodes=all_nodes,
                 storage_context=self.storage_context
             )
@@ -437,7 +433,7 @@ class IndexStore():
     async def delete_docs(self, doc_id_set:set = set()):
         deleting_list_key = f'{self.namespace}{self.name}_deleting_docs'
 
-        unfinished_deletes_b = self.redis_client.get(deleting_list_key)
+        unfinished_deletes_b = await self.async_redis_client.get(deleting_list_key)
         unfinished_deletes = json.loads(unfinished_deletes_b) if unfinished_deletes_b else []
 
         docs_to_remove = list(doc_id_set.union(unfinished_deletes))
@@ -530,7 +526,7 @@ class IndexStore():
 
         self.logger.debug("Removed %s document and %s nodes from docstore",
                          doc_remove_count, node_remove_count)
-        self.redis_client.set(deleting_list_key, '[]')
+        await self.async_redis_client.set(deleting_list_key, '[]')
 
 
     async def load_documents(self, document_list: list[Document] = [], force: bool = False):
@@ -678,7 +674,6 @@ class IndexStore():
 
     async def __aenter__(self):
         await self.initialize()
-        self.redis_client.publish(f"{self.namespace}{self.name}/status_channel", "{'status': 'ready', 'message': 'Issues refreshed.'}")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

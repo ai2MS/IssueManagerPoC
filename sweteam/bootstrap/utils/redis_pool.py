@@ -56,21 +56,10 @@ class RedisConnectionPool:
         client = redis.Redis(connection_pool=cls._pools[pool_key])
         cls._active_clients += 1
         
-        # Monkey patch the close method to also handle pool cleanup
-        original_close = client.close
-        def patched_close():
-            original_close()
-            cls._active_clients -= 1
-            if cls._active_clients == 0 and cls._active_async_clients == 0:
-                for pool in cls._pools.values():
-                    pool.disconnect()
-                cls._pools.clear()
-        client.close = patched_close
-        
         return client
 
     @classmethod
-    async def get_async_client(cls, **kwargs) -> redis.asyncio.Redis:
+    def get_async_client(cls, **kwargs) -> redis.asyncio.Redis:
         """Get an async Redis client from the connection pool.
 
         Args:
@@ -87,17 +76,6 @@ class RedisConnectionPool:
         client = redis.asyncio.Redis(connection_pool=cls._async_pools[pool_key])
         cls._active_async_clients += 1
         
-        # Monkey patch the close method to also handle pool cleanup
-        original_close = client.close
-        async def patched_close():
-            await original_close()
-            cls._active_async_clients -= 1
-            if cls._active_clients == 0 and cls._active_async_clients == 0:
-                for pool in cls._async_pools.values():
-                    await pool.disconnect()
-                cls._async_pools.clear()
-        client.close = patched_close
-        
         return client
 
     def __enter__(self) -> Self:
@@ -109,11 +87,22 @@ class RedisConnectionPool:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit the context manager and cleanup resources.
+        """Exit the context manager and cleanup resources."""
+        # Cleanup sync pools
+        for pool in self._pools.values():
+            pool.disconnect()
+        self._pools.clear()
+        self._active_clients = 0
         
-        Disconnects and cleans up all connection pools.
-        """
-        self.shutdown()
+        # Cleanup async pools
+        for pool in self._async_pools.values():
+            try:
+                import asyncio
+                asyncio.run(pool.disconnect())
+            except Exception:
+                pass
+        self._async_pools.clear()
+        self._active_async_clients = 0
 
     async def __aenter__(self) -> Self:
         """Enter the async context manager.
@@ -124,20 +113,18 @@ class RedisConnectionPool:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Exit the async context manager and cleanup resources.
-        
-        Disconnects and cleans up all connection pools.
-        """
+        """Exit the async context manager and cleanup resources."""
         # Cleanup sync pools
         for pool in self._pools.values():
             pool.disconnect()
         self._pools.clear()
+        self._active_clients = 0
         
         # Cleanup async pools
         for pool in self._async_pools.values():
             await pool.disconnect()
         self._async_pools.clear()
-
+        
     @classmethod
     def shutdown(cls):
         """Force shutdown all connection pools."""

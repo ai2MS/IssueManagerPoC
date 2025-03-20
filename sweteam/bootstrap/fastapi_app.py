@@ -46,8 +46,11 @@ class IssueManagementApp:
                                                     password=config.REDIS_PASSWORD,
                                                     username=config.REDIS_USERNAME,
                                                     db=0)
-        self.async_redis_client = None
-
+        self.async_redis_client = self.redis_pool.get_async_client(host=config.REDIS_HOST,
+                                                    port=config.REDIS_PORT,
+                                                    password=config.REDIS_PASSWORD,
+                                                    username=config.REDIS_USERNAME,
+                                                    db=0)
         # Add startup and shutdown events
         self.app.add_event_handler("startup", self.startup_event)
         self.app.add_event_handler("shutdown", self.shutdown_event)
@@ -74,11 +77,6 @@ class IssueManagementApp:
     async def startup_event(self):
         """Initialize the IssueManager on startup"""
         self.logger.debug("Setting up issue_manager for the FastAPI app...")
-        self.async_redis_client = await self.redis_pool.get_async_client(host=config.REDIS_HOST,
-                                                    port=config.REDIS_PORT,
-                                                    password=config.REDIS_PASSWORD,
-                                                    username=config.REDIS_USERNAME,
-                                                    db=0)
         self.issue_manager = IssueManager(redis_connection_pool=self.redis_pool)
         self.initialization_task = asyncio.create_task(self.issue_manager.initialize())
         self.logger.debug("Finished Setting up issue_manager for the FastAPI app, handling initialization to separate task...")
@@ -109,18 +107,29 @@ class IssueManagementApp:
     async def status_endpoint(self, request: Request):
         async def event_generator():
             if self.async_redis_client is None:
+                # Synchronous Redis client path
                 pubsub = self.redis_client.pubsub()
                 pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+                try:
+                    while True:
+                        message = pubsub.get_message(timeout=1.0)
+                        if message and message["type"] == "message":
+                            yield {"event": "message", "data": message["data"].decode()}
+                        await asyncio.sleep(0.1)  # Prevent blocking
+                except asyncio.CancelledError:
+                    pubsub.unsubscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+                    raise
             else:
+                # Asynchronous Redis client path
                 pubsub = self.async_redis_client.pubsub()
-                await pubsub.subscribe("status_channel")
-            try:
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        yield {"event": "message", "data": message["data"].decode()}
-            except asyncio.CancelledError:
-                await pubsub.unsubscribe("status_channel")
-                raise
+                await pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+                try:
+                    async for message in pubsub.listen():
+                        if message["type"] == "message":
+                            yield {"event": "message", "data": message["data"].decode()}
+                except asyncio.CancelledError:
+                    await pubsub.unsubscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+                    raise
 
         return EventSourceResponse(event_generator())
     
