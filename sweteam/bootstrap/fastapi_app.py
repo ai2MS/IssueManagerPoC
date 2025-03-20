@@ -79,6 +79,7 @@ class IssueManagementApp:
         self.logger.debug("Setting up issue_manager for the FastAPI app...")
         self.issue_manager = IssueManager(redis_connection_pool=self.redis_pool)
         self.initialization_task = asyncio.create_task(self.issue_manager.initialize())
+        asyncio.create_task(self.monitor_ready_status())
         self.logger.debug("Finished Setting up issue_manager for the FastAPI app, handling initialization to separate task...")
         return self.issue_manager
 
@@ -95,6 +96,50 @@ class IssueManagementApp:
         if self.issue_manager:
             await self.issue_manager.__aexit__(None, None, None)
 
+    async def monitor_ready_status(self):
+        """Subscribe to Redis pub/sub on "status_channel" and set self.initialized when status is 'ready'."""
+        if self.async_redis_client:
+            pubsub = self.async_redis_client.pubsub()
+            await pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode()
+                    try:
+                        msg = json.loads(data)
+                        if msg.get("status") == "ready":
+                            self.logger.debug("Received 'ready' status via async client. Setting initialized event.")
+                            self.initialized.set()
+                            break
+                    except json.JSONDecodeError:
+                        if data.strip() == "ready":
+                            self.logger.debug("Received plain 'ready' status via async client. Setting initialized event.")
+                            self.initialized.set()
+                            break
+        else:
+            # Fallback to synchronous Redis client
+            pubsub = self.redis_client.pubsub()
+            pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
+            while True:
+                message = pubsub.get_message(timeout=1.0)
+                if message and message["type"] == "message":
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode()
+                    try:
+                        msg = json.loads(data)
+                        if msg.get("status") == "ready":
+                            self.logger.debug("Received 'ready' status via sync client. Setting initialized event.")
+                            self.initialized.set()
+                            break
+                    except json.JSONDecodeError:
+                        if data.strip() == "ready":
+                            self.logger.debug("Received plain 'ready' status via sync client. Setting initialized event.")
+                            self.initialized.set()
+                            break
+                await asyncio.sleep(0.1)
+
     def _setup_routes(self):
         """Set up all routes for the application"""
         self.logger.debug("Setting up FastAPI routes...")
@@ -105,22 +150,25 @@ class IssueManagementApp:
         self.app.get("/api/status")(self.status_endpoint)
 
     async def status_endpoint(self, request: Request):
+        if self.initialized.is_set():
+            async def ready_generator():
+                yield {"event": "message", "data": json.dumps({"status": "ready", "message": "OK"})}
+            return EventSourceResponse(ready_generator())
+            
         async def event_generator():
             if self.async_redis_client is None:
-                # Synchronous Redis client path
                 pubsub = self.redis_client.pubsub()
                 pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
                 try:
                     while True:
-                        message = pubsub.get_message(timeout=1.0)
+                        message = pubsub.get_message(timeout=0.1)
                         if message and message["type"] == "message":
                             yield {"event": "message", "data": message["data"].decode()}
-                        await asyncio.sleep(0.1)  # Prevent blocking
+                        await asyncio.sleep(0.1)
                 except asyncio.CancelledError:
                     pubsub.unsubscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
                     raise
             else:
-                # Asynchronous Redis client path
                 pubsub = self.async_redis_client.pubsub()
                 await pubsub.subscribe(f"{self.issue_manager.namespace}{self.issue_manager.name}/status_channel")
                 try:

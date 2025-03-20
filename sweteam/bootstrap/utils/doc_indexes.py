@@ -237,6 +237,9 @@ class IndexStore():
         #  create RedisKVStore to be used by indexes
         self.redis_kvstore = RedisKVStore(redis_client=self.redis_client,
                                           async_redis_client=self.async_redis_client)
+        self.redis_client.publish(f"{self.namespace}{self.name}/status_channel"
+                                  , '{"status": "initializing", "message": "Refreshing Issues..."}')
+
 
     async def initialize(self) -> None:
         """Initialize the IndexStore asynchronously"""
@@ -292,7 +295,7 @@ class IndexStore():
         self.logger.debug(f"initialized Issue Index Vector Store...")
 
         await self.load_documents(await self.source.get_all_documents(), force=self.reset)
-        self.redis_client.publish(f"{self.namespace}{self.name}/status_channel", "{'status': 'ready', 'message': 'Issues refreshed.'}")
+        self.redis_client.publish(f"{self.namespace}{self.name}/status_channel", '{"status": "ready", "message": "Issues refreshed."}')
 
         self.logger.debug("Loaded / refreshed documents for all indexes")
 
