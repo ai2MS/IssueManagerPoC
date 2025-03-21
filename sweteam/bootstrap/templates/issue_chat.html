@@ -10,6 +10,10 @@
             padding: 10px;
             margin: 10px;
             border-radius: 5px;
+            overflow: hidden;
+            transition: max-height 0.5s ease-out, opacity 0.5s ease-out;
+            max-height: 100px; /* initial visible height */
+            opacity: 1;
         }
         .initializing { background-color: #fff3cd; }
         .ready { background-color: #d4edda; }
@@ -24,9 +28,34 @@
     <script>
         const statusDisplay = document.getElementById('statusDisplay');
 
+        function resetStatusDisplay() {
+            statusDisplay.style.transition = '';
+            statusDisplay.style.maxHeight = '100px';
+            statusDisplay.style.opacity = '1';
+            statusDisplay.style.display = 'block';
+        }
+
         function updateStatus(status, message = '') {
             statusDisplay.className = `status ${status}`;
             statusDisplay.textContent = message || status.charAt(0).toUpperCase() + status.slice(1);
+            if (status === 'ready') {
+                setTimeout(() => {
+                    // Only slide up if the current status remains "ready"
+                    if (statusDisplay.classList.contains('ready')) {
+                        // Slide up by reducing max-height and opacity.
+                        statusDisplay.style.transition = 'height 0.5s ease-out, max-height 0.5s ease-out, opacity 0.5s ease-out';
+                        statusDisplay.style.height = 0
+                        statusDisplay.style.maxHeight = '0px';
+                        statusDisplay.style.opacity = '0';
+                        statusDisplay.addEventListener('transitionend', function handler() {
+                            // Only hide if current maxHeight is 0
+                            if (getComputedStyle(statusDisplay).maxHeight === '0px') {
+                                statusDisplay.style.display = 'none';
+                            }
+                        }, { once: true });
+                    }
+                }, 3000);
+            }
         }
 
         // Connect to SSE endpoint
@@ -38,6 +67,7 @@
         };
 
         eventSource.onerror = function(error) {
+            console.log('EventSource failed:', error);
             updateStatus('error', 'Connection lost. Retrying...');
         };
     </script>
