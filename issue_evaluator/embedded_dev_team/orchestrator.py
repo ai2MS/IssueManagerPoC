@@ -354,7 +354,7 @@ class Orchestrator(BaseAgent):
                                                                  {'role': "user", 'content': to_agt_prompt},
                                                                  {'role': "assistant", 'content': agt_reply}])
                     code_saved = self.is_true(
-                        "Was the code saved successfully?", save_code_prompt, save_code_reply["message"]["content"])
+                        "Was the code saved successfully?", save_code_prompt, save_code_reply["content"])
                     if code_saved.is_true:
                         self.logger.info("Code snippets saved successfully.")
                         # update the issue ticket to reflect this update
@@ -384,7 +384,8 @@ class Orchestrator(BaseAgent):
 
                 match issue_stage.answer:
                     case "plan":
-                        self.logger("Issue %s is in plan stage, need to break it down to steps and sub-issues.", issue_number)
+                        self.logger.warning(
+                            "Issue %s is in plan stage, need to break it down to steps and sub-issues. please implement planning", issue_number)
                         pass
                     case "coding":
                         # test the updated file - run the code using execute_module()

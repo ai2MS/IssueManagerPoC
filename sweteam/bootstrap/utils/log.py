@@ -51,8 +51,8 @@ def get_logger(name: str, stream: str | bool = 'INFO', file: str | bool = '',
                 log_file, maxBytes=10485760, backupCount=9, encoding='utf-8')
             file_handler.setLevel(LOG_LEVEL[file])
             f_format = logging.Formatter("%(asctime)s %(levelname)s - %(name)s "
-                                        "- %(filename)s:%(lineno)d  "
-                                        "%(module)s.%(funcName)s() - %(message)s")
+                                         "- %(filename)s:%(lineno)d  "
+                                         "%(module)s.%(funcName)s() - %(message)s")
             file_handler.setFormatter(f_format)
             logger_.addHandler(file_handler)
 
@@ -63,7 +63,7 @@ def get_logger(name: str, stream: str | bool = 'INFO', file: str | bool = '',
 
 
 def get_default_logger(name: str = '', stream: str | bool | None = None, file: str | bool | None = None,
-               *, log_file: str | None = None, level: str | None = None) -> logging.Logger:
+                       *, log_file: str | None = None, level: str | None = None) -> logging.Logger:
     logger_name = config.PROJECT_NAME if name is None else name
     stream_level = config.LOG_LEVEL_CONSOLE if stream is None else stream
     file_level = config.LOG_LEVEL if file is None else file
@@ -94,4 +94,3 @@ def logging_context(*args, **kwargs) -> Generator[logging.Logger, None, None]:
             print(f"Can't log final message to logger, {e=}"
                   "shutting down the logging facility...")
         logging.shutdown()
-

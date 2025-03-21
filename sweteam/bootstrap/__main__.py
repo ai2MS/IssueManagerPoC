@@ -333,6 +333,5 @@ if __name__ == "__main__":
             project_name = os.path.basename(os.getcwd())
             overwrite = False
 
-    with logging_context(config.PROJECT_NAME, config.LOG_LEVEL_CONSOLE, config.LOG_LEVEL,
-                         log_file=config.PROJECT_NAME + ".log", level=config.LOG_LEVEL) as logger:
+    with logging_context() as logger:
         main()
