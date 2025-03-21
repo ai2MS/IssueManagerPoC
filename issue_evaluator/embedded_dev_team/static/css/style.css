@@ -1,0 +1,322 @@
+/* Main layout styles */
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+}
+
+/* JSON Formatter Styles */
+.json-formatter {
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    background-color: #f8f8f8;
+    border-radius: 4px;
+    padding: 10px;
+    overflow: auto;
+    max-height: 500px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.json-formatter .json-key {
+    color: #881391;
+    font-weight: bold;
+}
+
+.json-formatter .json-string {
+    color: #1a1aa6;
+}
+
+.json-formatter .json-number {
+    color: #1e7f0c;
+}
+
+.json-formatter .json-boolean {
+    color: #0000ff;
+}
+
+.json-formatter .json-null {
+    color: #808080;
+}
+
+/* Closing brackets and braces */
+.json-closing-bracket, .json-closing-brace, .json-closing {
+    margin-left: 20px;
+    display: flex;
+    vertical-align: bottom;
+}
+
+/* Collapsible JSON styles */
+.collapsible {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.collapsible::before {
+    content: "▼";
+    display: inline-block;
+    margin-right: 5px;
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+
+.collapsible.collapsed::before {
+    transform: rotate(-90deg);
+}
+
+.collapsible.collapsed::after {
+    content: "...";
+    color: #888;
+    margin: 0 2px;
+}
+
+.json-content {
+    margin-left: 20px;
+    transition: height 0.2s ease-out;
+    width: 100%;
+    display: block;
+}
+
+.json-content.hidden {
+    display: none;
+}
+
+/* JSON array and object item styles */
+.json-array-item, .json-property {
+    position: relative;
+    margin: 2px 0;
+}
+
+.json-comma {
+    margin-left: 2px;
+    display: inline-block;
+    vertical-align: bottom;
+    
+}
+
+/* JSON item container */
+.json-item {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    position: relative;
+}
+
+/* Key styling */
+.json-key {
+    color: #881391;
+    font-weight: bold;
+}
+
+/* Left panel - Issue display */
+.issue-panel {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+    background-color: #f9f9f9;
+}
+
+.issue-header {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ddd;
+}
+
+.issue-title {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.issue-meta {
+    display: flex;
+    justify-content: space-between;
+    color: #666;
+    font-size: 14px;
+}
+
+.issue-content {
+    line-height: 1.6;
+}
+
+.issue-description {
+    margin-bottom: 20px;
+}
+
+.issue-comments {
+    margin-top: 20px;
+}
+
+.comment {
+    padding: 10px;
+    margin-bottom: 10px;
+    background-color: #fff;
+    border-radius: 5px;
+    border: 1px solid #eee;
+}
+
+.comment-author {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.comment-date {
+    font-size: 12px;
+    color: #888;
+}
+
+.issue-selector {
+    margin-bottom: 20px;
+    padding: 10px;
+    border-radius: 5px;
+    background-color: #f0f0f0;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.issue-selector:hover {
+    background-color: #e0e0e0;
+}
+
+.issue-selector select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    background-color: #fff;
+    cursor: pointer;
+}
+
+/* Right panel - Chat interface */
+.chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #fff;
+}
+
+.chat-header {
+    padding: 15px;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+}
+
+.chat-messages {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+}
+
+.message {
+    margin-bottom: 15px;
+    max-width: 80%;
+    padding: 10px 15px;
+    border-radius: 18px;
+    line-height: 1.4;
+}
+
+.user-message {
+    background-color: #e1f5fe;
+    margin-left: auto;
+    border-bottom-right-radius: 5px;
+}
+
+.ai-message {
+    background-color: #f1f1f1;
+    margin-right: auto;
+    border-bottom-left-radius: 5px;
+}
+
+.chat-input {
+    display: flex;
+    padding: 15px;
+    border-top: 1px solid #ddd;
+}
+
+.chat-input input {
+    flex: 1;
+    padding: 10px 15px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    margin-right: 10px;
+}
+
+.chat-input button {
+    padding: 10px 20px;
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+.chat-input button:hover {
+    background-color: #0b7dda;
+}
+
+/* Typing Indicator */
+.typing-indicator {
+    background-color: #f1f1f1;
+    border-radius: 18px;
+    border-bottom-left-radius: 5px;
+    padding: 15px 20px;
+    display: none;
+    margin-bottom: 15px;
+    max-width: 80%;
+    margin-right: auto;
+    position: relative;
+}
+
+.typing-indicator span {
+    height: 8px;
+    width: 8px;
+    background-color: #8b8b8b;
+    display: inline-block;
+    border-radius: 50%;
+    margin-right: 5px;
+    animation: typing-dot 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.typing-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
+    margin-right: 0;
+}
+
+@keyframes typing-dot {
+    0%, 60%, 100% { 
+        transform: translateY(0);
+    }
+    30% { 
+        transform: translateY(-5px);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .container {
+        flex-direction: column;
+    }
+    
+    .issue-panel, .chat-panel {
+        flex: none;
+        height: 50vh;
+    }
+}

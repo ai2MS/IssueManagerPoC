@@ -1,0 +1,7 @@
+services:
+  issue_evaluator:
+    build: .
+    command: poetry run python -m issue_evaluator
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    restart: always

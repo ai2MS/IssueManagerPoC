@@ -31,7 +31,7 @@
             },
             "type": "debugpy",
             "request": "launch",
-            "module": "sweteam.bootstrap",
+            "module": "issue_evaluator.embedded_dev_team",
             //"args": "${command:pickArgs}",
             "console": "integratedTerminal",
             "subProcess": false

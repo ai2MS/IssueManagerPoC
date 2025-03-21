@@ -1,0 +1,264 @@
+
+- timestamp: '2024-09-23T05:01:28.859623'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure that you update the relevant files and provide
+    detailed information on the changes made. Additionally, update the issues you
+    are working on, provide testing steps for the new functionalities, and ensure
+    the outcome meets the expectations of the issue requirement.
+
+- timestamp: '2024-09-23T09:32:19.204928'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to update the issues you are asked to work
+    on. Provide testing steps for the new functionalities. When executing tests, ensure
+    the outcome meets the expectations of the issue requirements. Document which files
+    you have updated.
+
+- timestamp: '2024-09-23T09:54:40.330416'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to update the files you are working on. Update
+    the issues you are assigned to work on. Provide testing steps for the new functionalities.
+    Ensure that the outcome meets the expectations of the issue requirement when executing
+    the test.
+
+- timestamp: '2024-09-24T00:31:05.304712'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure that you create or update code files as required
+    by the task. Additionally, make sure to update the issues you are working on and
+    provide testing steps for the new functionalities. When executing tests, ensure
+    that the outcome meets the expectations of the issue requirements.
+
+- timestamp: '2024-09-24T00:33:32.360258'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure that you create or update code files as required
+    by the task. Additionally, make sure to update the issues you are working on and
+    provide testing steps for the new functionalities. When executing tests, ensure
+    that the outcome meets the expectations of the issue requirements.
+
+- timestamp: '2024-09-24T00:33:50.981830'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure that you create or update code files as required
+    by the task. Additionally, make sure to update the issues you are working on and
+    provide testing steps for the new functionalities. When executing tests, ensure
+    that the outcome meets the expectations of the issue requirements.
+
+- timestamp: '2024-09-24T01:57:19.190587'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T01:57:38.847978'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure the following:
+
+    1. Create or update code files as required by the task.
+
+    2. Update the issues you are working on.
+
+    3. Provide testing steps for the new functionalities.
+
+    4. Ensure that the outcome of the test meets the expectations of the issue requirements.
+
+    Please complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T01:57:51.494773'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T02:03:14.456172'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T02:09:10.432884'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T04:36:22.382103'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T04:40:46.385763'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-24T04:46:57.977607'
+  evaluated by: ea
+  score: -3
+  additional_instructions: 'Please ensure that you create or update code files as
+    required by the task. Additionally, make sure to update the issues you are working
+    on and provide testing steps for the new functionalities. When executing tests,
+    ensure that the outcome meets the expectations of the issue requirements. Please
+    complete the task for issue #1 by writing the necessary code.'
+
+- timestamp: '2024-09-25T05:04:21.152046'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the issue. Update the issue with the work done, provide testing steps for the
+    new functionalities, and ensure the test outcomes meet the expectations of the
+    issue requirements.
+
+- timestamp: '2024-09-25T05:12:36.070952'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the issue. Update the issue with the work done, provide testing steps for the
+    new functionalities, and ensure the test outcomes meet the expectations of the
+    issue requirements.
+
+- timestamp: '2024-09-25T05:17:48.659671'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the issue. Update the issue with the work done, provide testing steps for the
+    new functionalities, and ensure the test outcomes meet the expectations of the
+    issue requirements.
+
+- timestamp: '2024-09-25T05:20:47.788822'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the issue. Update the issue with the work done, provide testing steps for the
+    new functionalities, and ensure the test outcomes meet the expectations of the
+    issue requirements.
+
+- timestamp: '2024-09-25T14:40:01.656996'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the task. Additionally, update the issues you are working on, provide testing
+    steps for new functionalities, and ensure that the outcome meets the expectations
+    of the issue requirements.
+
+- timestamp: '2024-09-25T14:45:42.095210'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the task. Additionally, update the issues you are working on, provide testing
+    steps for new functionalities, and ensure that the outcome meets the expectations
+    of the issue requirements.
+
+- timestamp: '2024-09-25T14:46:05.649931'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the task. Additionally, update the issues you are working on, provide testing
+    steps for new functionalities, and ensure that the outcome meets the expectations
+    of the issue requirements.
+
+- timestamp: '2024-09-25T14:49:26.135060'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update code files as required
+    by the task. Additionally, update the issues you are working on, provide testing
+    steps for new functionalities, and ensure that the outcome meets the expectations
+    of the issue requirements.
+
+- timestamp: '2024-09-28T01:43:16.108589'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure to create or update the code files as necessary.
+    Update the issues you are working on with relevant information. Provide testing
+    steps for any new functionalities implemented. Ensure that the outcome of the
+    tests meets the expectations of the issue requirements.
+
+- timestamp: '2024-09-28T01:52:15.616896'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update the relevant code files
+    when working on a task. Additionally, update the issues you are working on with
+    detailed information about the changes made. Providing testing steps for new functionalities
+    is crucial. Ensure that the outcome of the tests meets the expectations of the
+    issue requirements.
+
+- timestamp: '2024-09-28T02:12:33.569932'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure to create or update code files, update the
+    issues you are working on, provide testing steps for new functionalities, and
+    ensure that the outcome meets the expectations of the issue requirements.
+
+- timestamp: '2024-09-28T05:16:53.125692'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure that you create or update code files as required,
+    update the issues you are working on, provide testing steps for new functionalities,
+    and ensure that the test outcomes meet the expectations of the issue requirements.
+
+- timestamp: '2024-09-28T05:17:31.093024'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure to create or update code files as required,
+    update the issues you are working on, provide testing steps for new functionalities,
+    and ensure the test outcomes meet the expectations of the issue requirements.
+
+- timestamp: '2024-09-28T05:22:43.353203'
+  evaluated by: ea
+  score: -3
+  additional_instructions: Please ensure to create or update code files as required,
+    update the issues you are working on, provide testing steps for the new functionalities,
+    and ensure that the test outcomes meet the expectations of the issue requirements.
+
+- timestamp: '2024-09-28T05:41:49.353110'
+  evaluated by: ea
+  score: -2
+  additional_instructions: Please ensure to create or update the relevant code files
+    when working on a task. Additionally, update the issues you are working on with
+    detailed information about the changes made. Providing testing steps for new functionalities
+    is crucial. Ensure that the outcome of the tests meets the expectations of the
+    issue requirements.
+
+- timestamp: '2024-09-29T07:22:16.686338'
+  evaluated by: ea
+  score: -3
+  additional_instructions: '1. Ensure to create or update code files as required by
+    the task.
+
+    2. Update the issues you are working on with detailed progress and status changes.
+
+    3. Provide clear testing steps for any new functionalities you implement.
+
+    4. Ensure that the implemented functionalities meet the requirements and pass
+    the tests before marking the task as completed.'
+
+- timestamp: '2024-09-29T08:23:33.053374'
+  evaluated by: ea
+  score: -1
+  additional_instructions: Please ensure that you create or update code files as required,
+    update the issues you are working on, provide testing steps for new functionalities,
+    and ensure that the outcome of the test meets the expectations of the issue requirement.

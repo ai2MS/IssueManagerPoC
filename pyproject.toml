@@ -30,4 +30,7 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=8.2.0,<9"]
 
+[tool.uv.workspace]
+members = ["issue_evaluator"]
+
 

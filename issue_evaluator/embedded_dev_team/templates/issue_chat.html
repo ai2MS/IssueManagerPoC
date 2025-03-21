@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue Management Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .status {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 5px;
+        }
+        .initializing { background-color: #fff3cd; }
+        .ready { background-color: #d4edda; }
+        .error { background-color: #f8d7da; }
+    </style>
+</head>
+<body>
+    <!--status bar-->
+    <div id="statusDisplay" class="status initializing">
+        Updating...
+    </div>
+    <script>
+        const statusDisplay = document.getElementById('statusDisplay');
+
+        function updateStatus(status, message = '') {
+            statusDisplay.className = `status ${status}`;
+            statusDisplay.textContent = message || status.charAt(0).toUpperCase() + status.slice(1);
+        }
+
+        // Connect to SSE endpoint
+        const eventSource = new EventSource('/api/status');
+
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            updateStatus(data.status, data.message);
+        };
+
+        eventSource.onerror = function(error) {
+            updateStatus('error', 'Connection lost. Retrying...');
+        };
+    </script>
+
+    <!--normal contents-->
+    <div class="container">
+        <!-- Left panel - Issue display -->
+        <div class="issue-panel">
+            <div class="issue-selector">
+                <label for="issue-selector">Select Issue:</label>
+                <select id="issue-selector">
+                    {% for issue in issues %}
+                    <option value="{{ issue.id }}">{{ issue.id }}: {{ issue.title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="issue-header">
+                <div class="issue-title" id="issue-title">Loading issue...</div>
+                <div class="issue-meta">
+                    <span>ID: <span id="issue-id">-</span></span>
+                    <span>Status: <span id="issue-status">-</span></span>
+                    <span>Created: <span id="issue-created">-</span></span>
+                </div>
+            </div>
+            
+            <div class="issue-content">
+                <h3>Description</h3>
+                <div class="issue-description" id="issue-description">
+                    Loading issue details...
+                </div>
+                
+                <h3>Comments</h3>
+                <div class="issue-comments" id="issue-comments">
+                    <p>Loading comments...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right panel - Chat interface -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <h2>AI Assistant</h2>
+            </div>
+
+            <div class="evaluation-criteria">
+                <label for="evaluation-criteria" style="vertical-align: top;">Evaluation Criteria:</label>
+                <textarea id="evaluation-criteria" placeholder="Enter evaluation criteria..." style="width:100%; height:30%;"></textarea>
+            </div>
+                        
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be added here dynamically -->
+                <div class="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+            
+            <form id="chat-form" class="chat-input">
+                <input type="text" id="chat-input" placeholder="Type your message here..." autocomplete="off">
+                <button type="submit">Send</button>
+            </form>
+        </div>
+    </div>
+    
+    <script src="/static/js/json-formatter.js"></script>
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>

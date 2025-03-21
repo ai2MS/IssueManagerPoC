@@ -1,0 +1,47 @@
+2025-03-21 01:45:09,587 - INFO - self(orchestrator) >> orchestrator - Issue 1 is assigned to orchestrator,  which does not exist. Based on these roles descriptions, use the issue_manager tool action=assign to assign this issue to the most appropriate agent.
+agent_roles: [('frontend_dev', 'The role of the agent is to produce working front-end code for software projects, primarily writing HTML, CSS, and JavaScript (using HTMX or other specified frameworks) based on instructions provided.'), ('architect', 'The role of the agent is to determine technical components needed for a project, create a boilerplate project where each component works together, design API contracts if necessary, ensure the boilerplate is working properly, and then assign it to either the frontend or backend developer.'), ('designer', 'The role of the agent as a Senior Software Development Engineer in Testing (SDET) involves writing and executing test cases based on software requirements provided by PMs or technical leads.'), ('sre', 'As senior Site Reliability Engineer (SRE), you are responsible for building Docker images for completed code, deploying them using kubectl after development and testing, and managing backend server execution.'), ('pm', 'The role of the agent is to collect user input, write software requirements that are clear and sufficient for developers to start coding, analyze given information to ensure clarity and completeness, break down complex issues into smaller sub-issues if necessary, communicate with architects and designers for further details when needed, and use tools like issue_manager, chat_with_other_agent, and get_human_input to manage tasks effectively.'), ('backend_dev', 'The role of the agent is to produce fully functioning code based on the software requirements and technical designs provided.'), ('orchestrator', 'The role of the agent is to coordinate with other agents and ensure they follow their instructions.')].issue_manager() tool instruction: Issues include user stories, bugs, and feature requests, and can have sub-issues (e.g., issue#123/1 and issue#123/2).
+
+## Function Tool issue_manager usage
+examples of how to use issue_manager
+- **List Issues**:
+  ```python
+  issue_manager(action="list", only_in_state=["new", "in progress"])
+  issue_manager(action="list", issue="123")
+  ```
+
+- **Read Issue**:
+  ```python
+  issue_manager(action="read", issue="123")
+  ```
+
+**Before creating a new issue, search the issue_board directory to make sure duplicate issue that has already been created, avoid creating duplicate issues, use update instead**
+- **Create Issue**:
+  ```python
+  issue_manager(action="create",
+                content='{"title": "", "description":"", "status":"","priority":"","created_at":"", "prerequisites":[] "updates":[]}')
+  issue_manager(action="create", issue="123",
+                content='{"title": "", "description":"", "status":"","priority":"","created_at":"", "updates":[]}')
+  ```
+
+**Always update the issue ticket with the work you have done.**
+- **Update Issue**:
+  ```python
+  issue_manager(action='update', issue="123",
+                content='{"assignee":"","details":"","updated_at":"", "status":"", "priority":""}')
+  ```
+
+- **Assign Issue**:
+  ```python
+  issue_manager(action='assign', issue="123", assignee="pm")
+  ```
+ (use tools=True)
+2025-03-21 01:45:15,800 - INFO - orchestrator >> architect - Hello Architect, could you please provide a technical breakdown of the project and share your vision for how we should proceed? (use tools=True)
+2025-03-21 01:45:19,003 - INFO - orchestrator >> architect - Hello Architect, could you please provide a detailed technical breakdown of the project and share your vision for how we should proceed? (use tools=True)
+2025-03-21 02:25:44,003 - INFO - orchestrator >> sre - Please create a copy of orchestrator.py and name it evaluator.py. Then, update this new file to include functionality for asking evaluation criteria and using these criteria to evaluate the quality of an issue ticket. (use tools=True)
+2025-03-21 02:25:49,384 - INFO - orchestrator >> sre - Please create a copy of orchestrator.py and name it evaluator.py. Then, update this new file to include functionality for asking evaluation criteria and using these criteria to evaluate the quality of an issue ticket. (use tools=True)
+2025-03-21 02:25:57,829 - INFO - orchestrator >> sre - Please create a new Python script named evaluator.py by copying the contents of orchestrator.py. (use tools=True)
+2025-03-21 02:25:57,830 - INFO - orchestrator >> sre - Please add functionality in evaluator.py to ask for evaluation criteria and use these criteria to evaluate the quality of an issue ticket. (use tools=True)
+2025-03-21 02:26:04,379 - INFO - orchestrator >> sre - Please create a new Python script named evaluator.py by copying the contents of orchestrator.py. (use tools=True)
+2025-03-21 02:26:04,380 - INFO - orchestrator >> sre - After creating evaluator.py, please add functionality to ask for evaluation criteria and use these criteria to evaluate issue ticket quality. (use tools=True)
+2025-03-21 02:26:29,606 - INFO - orchestrator >> sre - Please create a new Python script named evaluator.py by copying the contents of orchestrator.py and add functionality to ask for evaluation criteria and use these criteria to evaluate issue ticket quality. (use tools=True)
+2025-03-21 02:29:02,363 - INFO - orchestrator >> architect - Issue 1 is assigned to you and is in new status, it is about Create a copy of orchestrator.py named evaluator.py, update it to ask for evaluation criteria, then use these criteria to evaluate issue ticket quality.. Please review the details of this issue using issue_manager and if it is specific enough to be coded, please write the code, If you feel it is not clear and specific enough please analyze how to describe it in more details and create more specific sub issues for coding. (use tools=True)
